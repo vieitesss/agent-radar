@@ -73,7 +73,7 @@ while IFS= read -r session; do
     [ "$count" -gt 0 ] || continue
 
     name=$session
-    [ "$count" -gt 1 ] && name="$session×$count"
+    [ "$count" -gt 1 ] && name="${session}×$count"
     out=${out}${sep}${name}
     sep=' / '
 done <<EOF
