@@ -65,22 +65,3 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-popup-position` | `C` | Popup position: `C`, `x,y`, or corner shorthand (`tl`/`tr`/`bl`/`br`) |
 | `@agent-radar-status-label` | `agents` | Label in the status segment |
 | `@agent-radar-status-color` | `yellow` | Color of the status segment |
-
-## How detection works
-
-`agent-radar-poller` runs one tmux-scoped background daemon. Each cycle it
-enumerates panes with `tmux list-panes -a`, keeps those whose TTY runs an
-allowlisted agent, captures each pane and checks it against
-`@agent-radar-working-pattern` for the live "working" spinner, and stores
-per-pane state in tmux global environment (`TMUX_AGENT_RADAR_PANE_*`). A pane
-goes `stopped` when it was working (armed) and then showed no spinner for
-`@agent-radar-idle-seconds`. `agent-radar-status` reads that state for the
-status segment; `agent-radar-list` reads it for the navigator.
-
-## Scripts
-
-- `agent-radar.tmux` — entry point: wires the status segment, keybind, and
-  starts the poller.
-- `scripts/agent-radar-poller` — the detection daemon (`start|once|stop|restart`).
-- `scripts/agent-radar-status` — status-left segment for stopped agents.
-- `scripts/agent-radar-list` — fzf navigator popup.
