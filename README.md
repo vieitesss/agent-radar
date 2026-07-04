@@ -1,4 +1,4 @@
-![](assets/showcase.mp4)
+<p align="center"><video src="https://github.com/vieitesss/agent-radar/raw/main/assets/showcase.mp4" controls muted loop></video></p>
 
 # agent-radar
 
