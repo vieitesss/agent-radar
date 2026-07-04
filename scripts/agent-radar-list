@@ -2,9 +2,8 @@
 set -eu
 
 command -v tmux >/dev/null 2>&1 || exit 0
-command -v fzf >/dev/null 2>&1 || { tmux display-message 'agent-radar: fzf not found'; exit 0; }
 
-rows=$(
+rows() {
     tmux show-environment -g 2>/dev/null |
     awk -F= -v now="$(date +%s)" '
 function remember(suffix, arr, key, val, pane) {
@@ -59,14 +58,31 @@ END {
     }
 }' |
     sort -t '|' -k1,1n -k2,2
-)
+}
 
+if [ "${1:-}" = rows ]; then
+    rows
+    exit 0
+fi
+
+command -v fzf >/dev/null 2>&1 || { tmux display-message 'agent-radar: fzf not found'; exit 0; }
+
+rows=$(rows)
 [ -n "$rows" ] || { tmux display-message 'agent-radar: no agent panes'; exit 0; }
+
+refresh_interval=$(tmux show-option -gqv @agent-radar-poll-interval 2>/dev/null || true)
+case "$refresh_interval" in
+    ''|*[!0-9]*) refresh_interval=2 ;;
+esac
+[ "$refresh_interval" -gt 0 ] || refresh_interval=1
+script_path=$(CDPATH= cd "$(dirname "$0")" && pwd -P)/$(basename "$0")
+refresh_cmd='"$AGENT_RADAR_LIST" rows; sleep '"$refresh_interval"
 
 selected=$(
     printf '%s\n' "$rows" |
-    FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= fzf --ansi --layout=reverse \
-        --delimiter='|' --with-nth=3 || true
+    AGENT_RADAR_LIST=$script_path FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= fzf --ansi --layout=reverse \
+        --delimiter='|' --with-nth=3 --track --id-nth=4 \
+        --bind "load:reload($refresh_cmd)" || true
 )
 [ -n "$selected" ] || exit 0
 
