@@ -21,8 +21,8 @@ harness, not just the ones with hooks.
   with a stopped agent, dismissed when you focus that session.
 - **Navigates** — `prefix + A` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
-  running, seen-stopped) and stopped age. Pick one
-  and it jumps to that exact `session:window.pane`.
+  running, seen-stopped) and stopped age. The list refreshes while open. Pick
+  one and it jumps to that exact `session:window.pane`.
 
 ## Requirements
 
