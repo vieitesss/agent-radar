@@ -1,0 +1,41 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_dir=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P) || exit 1
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-plugin-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+log=$tmp/tmux.log
+: > "$log"
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    show-option)
+        case "$3" in
+            status-left) printf 'left ' ;;
+            window-status-format) printf '#I:#W' ;;
+            window-status-current-format) printf '#[reverse]#I:#W' ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    set-option|bind-key|run-shell)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin/tmux"
+
+PATH=$tmp/bin:$PATH TMUX_LOG=$log "$repo_dir/agent-radar.tmux"
+
+grep -F 'set-option -g window-status-format #{?@agent-radar-window-stopped,' "$log" >/dev/null || {
+    echo 'window-status-format does not include agent-radar stopped marker' >&2
+    exit 1
+}
+grep -F 'set-option -g window-status-current-format #{?@agent-radar-window-stopped,' "$log" >/dev/null || {
+    echo 'window-status-current-format does not include agent-radar stopped marker' >&2
+    exit 1
+}
+
+printf 'agent-radar-plugin ok\n'

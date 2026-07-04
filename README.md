@@ -21,7 +21,8 @@ harness, not just the ones with hooks.
   thing: go look.
 - **Notifies you** — a macOS notification fires once per stop transition (via
   `osascript`), backed by a persistent status-left segment listing sessions
-  with a stopped agent, marked seen when you focus that session.
+  with a stopped agent and a highlighted tmux window until you focus the exact
+  agent pane.
 - **Navigates** — `prefix + A` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
   running, seen-stopped) and stopped age. The list refreshes while open. Pick
@@ -50,7 +51,8 @@ what a standalone install looks like. Reload tmux afterwards.
 
 - `prefix + A` — open the navigator popup, select an agent, jump to its pane.
 - The status-left segment shows sessions with an unseen stopped agent, e.g.
-  `[agents - work / build×2]`.
+  `[agents - work / build×2]`; those tmux windows are highlighted until you
+  focus the exact agent pane.
 
 ## Options
 
@@ -68,3 +70,4 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-popup-position` | `C` | Popup position: `C`, `x,y`, or corner shorthand (`tl`/`tr`/`bl`/`br`) |
 | `@agent-radar-status-label` | `agents` | Label in the status segment |
 | `@agent-radar-status-color` | `yellow` | Color of the status segment |
+| `@agent-radar-window-color` | `red` | Background color for windows containing unseen stopped agents |

@@ -1,0 +1,73 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+status=$script_dir/agent-radar-status
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-status-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+fixture=$tmp/env
+log=$tmp/tmux.log
+: > "$log"
+cat > "$fixture" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%1_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%1_TARGET=work:2.1
+TMUX_AGENT_RADAR_PANE_%1_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%2_AGENT=claude
+TMUX_AGENT_RADAR_PANE_%2_TARGET=work:3.0
+TMUX_AGENT_RADAR_PANE_%2_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%2_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%2_SEEN_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%3_AGENT=codex
+TMUX_AGENT_RADAR_PANE_%3_TARGET=other:1.0
+TMUX_AGENT_RADAR_PANE_%3_STATE=working
+EOF
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    display-message)
+        if [ "$2" = -p ] && [ "$3" = '#{session_name}' ]; then
+            printf 'work\n'
+            exit 0
+        fi
+        if [ "$2" = -p ] && [ "$3" = -t ] && [ "$4" = work ] && [ "$5" = '#{pane_id}' ]; then
+            printf '%%9\n'
+            exit 0
+        fi
+        echo "unexpected display-message $*" >&2; exit 1
+        ;;
+    show-option) exit 0 ;;
+    list-sessions) printf 'work\nother\n' ;;
+    list-windows) printf 'work:2\nwork:3\nother:1\n' ;;
+    set-window-option)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
+    set-environment)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin/tmux"
+
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$status" work > "$tmp/out"
+printf '#[fg=yellow][agents - work]#[default]' > "$tmp/expected-out"
+diff -u "$tmp/expected-out" "$tmp/out"
+
+grep -Fx 'set-window-option -t work:2 -q @agent-radar-window-stopped 1' "$log" >/dev/null || {
+    echo 'unseen stopped window was not highlighted' >&2
+    exit 1
+}
+if grep -F 'set-window-option -t work:3 -q @agent-radar-window-stopped 1' "$log" >/dev/null; then
+    echo 'seen stopped window was highlighted' >&2
+    exit 1
+fi
+if grep -F 'set-window-option -t other:1 -q @agent-radar-window-stopped 1' "$log" >/dev/null; then
+    echo 'running window was highlighted' >&2
+    exit 1
+fi
+
+printf 'agent-radar-status ok\n'

@@ -21,6 +21,20 @@ case "$status_left" in
     *) tmux set-option -g status-left "${status_left}${status_cmd} " ;;
 esac
 
+ensure_window_format() {
+    name=$1
+    marker='#{?@agent-radar-window-stopped,#[bg=#{@agent-radar-window-color}],}'
+    fmt=$(tmux show-option -gqv "$name" 2>/dev/null || true)
+    case "$fmt" in
+        *agent-radar-window-stopped*) ;;
+        *) tmux set-option -g "$name" "${marker}${fmt}#[default]" ;;
+    esac
+}
+
+tmux set-option -gq @agent-radar-window-color "$(opt @agent-radar-window-color red)"
+ensure_window_format window-status-format
+ensure_window_format window-status-current-format
+
 tmux set-option -gq @agent-radar-plugin-dir "$current_dir"
 
 popup_key=$(opt @agent-radar-key a)
