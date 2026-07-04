@@ -15,13 +15,20 @@ The fully-qualified `session:window.pane` address of an agent pane — what the
 navigator jumps to and what agents are sorted by alphabetically.
 _Avoid_: location, path
 
+**Working indicator**:
+The live animated marker a harness paints while working — a braille progress
+glyph (pi/claude/codex) or a pulsing square progress bar (opencode). The one
+positive signal agent-radar keys off; it only exists while the harness animates
+it, so it can't be faked by quoted transcript text.
+_Avoid_: harness-specific names as generic terms
+
 **Working**:
-An agent pane visibly animating its busy spinner. The only positive signal;
+An agent pane visibly animating its working indicator. The only positive signal;
 everything else is "not working".
 _Avoid_: busy, active
 
 **Stopped**:
-An agent pane that has shown no working spinner for the idle threshold. Means
+An agent pane that has shown no working indicator for the idle threshold. Means
 "go look" — indistinguishable from, and treated the same as, "waiting for input".
 _Avoid_: idle, done, finished
 

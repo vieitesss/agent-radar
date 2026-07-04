@@ -52,4 +52,13 @@ AGENT_RADAR_STORE_FILE=$env AGENT_RADAR_NOW=120 "$list" rows > "$tmp/list-rows"
 } > "$tmp/expected-list"
 diff -u "$tmp/expected-list" "$tmp/list-rows"
 
+printf '%%s|pi|s:1|||stopped|9970|\n%%m|pi|m:1|||stopped|9700|\n%%h|pi|h:1|||stopped|4600|\n%%i|pi|i:1|||stopped|2800|\n' |
+    "$classify" 10000 |
+    awk -F '|' '{print $2}' > "$tmp/ages"
+{
+    printf '30s\n5m\n1h\n'
+    printf '\342\210\236\n'
+} > "$tmp/expected-ages"
+diff -u "$tmp/expected-ages" "$tmp/ages"
+
 printf 'agent-radar-classify ok\n'

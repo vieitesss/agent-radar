@@ -1,0 +1,56 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+poller=$script_dir/agent-radar-poller
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-poller-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+fixture=$tmp/env
+log=$tmp/tmux.log
+cat > "$fixture" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%1_AGENT=opencode
+TMUX_AGENT_RADAR_PANE_%1_TARGET=test:1.0
+TMUX_AGENT_RADAR_PANE_%1_LAST_CHANGE=100
+TMUX_AGENT_RADAR_PANE_%1_ARMED=1
+TMUX_AGENT_RADAR_PANE_%1_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT=100
+EOF
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    show-option) exit 0 ;;
+    list-panes) printf '%%1|test:1.0|/dev/ttys001\n' ;;
+    capture-pane)
+        [ "$1 $2 $3" = 'capture-pane -pJ -t' ] || { echo "unexpected capture-pane args: $*" >&2; exit 1; }
+        printf '⬝■■■■■■⬝  esc interrupt\n'
+        ;;
+    set-environment)
+        case "$2" in
+            -g) printf 'set %s=%s\n' "$3" "$4" >> "$TMUX_LOG" ;;
+            -gu) printf 'unset %s\n' "$3" >> "$TMUX_LOG" ;;
+            *) echo "unexpected set-environment args: $*" >&2; exit 1 ;;
+        esac
+        ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+cat > "$tmp/bin/ps" <<'EOF'
+#!/usr/bin/env sh
+[ "$1 $2 $3" = '-t ttys001 -o' ] && [ "$4" = 'comm=' ] || { echo "unexpected ps $*" >&2; exit 1; }
+printf 'opencode\n'
+EOF
+chmod +x "$tmp/bin/tmux" "$tmp/bin/ps"
+
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$poller" once
+
+grep -Fx 'set TMUX_AGENT_RADAR_PANE_%1_STATE=working' "$log" >/dev/null
+grep -Fx 'unset TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT' "$log" >/dev/null
+if grep -F 'TMUX_AGENT_RADAR_PANE_%1_STATE=stopped' "$log" >/dev/null; then
+    echo 'opencode square bar was classified stopped' >&2
+    exit 1
+fi
+
+printf 'agent-radar-poller ok\n'

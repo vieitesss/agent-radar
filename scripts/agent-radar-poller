@@ -19,6 +19,10 @@ pid_set() {
 }
 
 pid_unset() {
+    owner=${1:-}
+    if [ -n "$owner" ] && [ "$(pid_val)" != "$owner" ]; then
+        return 0
+    fi
     tmux set-option -gqu @agent-radar-pid 2>/dev/null || true
 }
 
@@ -38,17 +42,25 @@ clear_pane() {
     "$store_cmd" clear "$1"
 }
 
-# True when the pane visibly shows agent "working" chrome. This is how herdr
-# does it: match the live working *spinner*, not a screen diff and not text
-# hints. The braille spinner glyph only exists while the agent animates it, so
+# True when the pane visibly shows the agent working indicator. This is how herdr
+# does it: match the live working indicator, not a screen diff and not text
+# hints. The braille progress glyph only exists while the agent animates it, so
 # it can't collide with transcript prose that merely quotes "Working..." or
 # "esc to interrupt" (that quoting is exactly what produced false positives).
 # Matched byte-wise under LC_ALL=C so it's locale-proof: any braille codepoint
 # U+2800-U+28FF is E2 followed by A0-A3, and box-drawing (E2 94..) can't match.
-# ponytail: an agent whose busy indicator isn't a braille spinner won't be
-# detected -- override @agent-radar-working-pattern with its own marker.
+# opencode doesn't animate braille; its working indicator is a pulsing progress bar
+# of filled/dim squares (U+25A0 = E2 96 A0, U+2B1D = E2 AC 9D), so the default
+# also matches a run of 4+ of those. A 4-long square run can't occur in prose.
+# ponytail: an agent whose working indicator is neither braille nor a square bar
+# won't be detected -- override @agent-radar-working-pattern with its own marker.
+# Capture WITHOUT -e (no SGR escapes): opencode colors each square of its
+# progress bar individually, so with -e the per-cell color codes split the
+# run below 4 and mixed-color frames miss -> false "stopped". Plain text keeps
+# the glyphs contiguous; braille glyphs are single-color so this is a no-op
+# for pi/claude/codex.
 detect_working() {
-    LC_ALL=C tmux capture-pane -epJ -t "$1" 2>/dev/null | LC_ALL=C grep -qE "$work_re"
+    LC_ALL=C tmux capture-pane -pJ -t "$1" 2>/dev/null | LC_ALL=C grep -qE "$work_re"
 }
 
 agent_for_tty() {
@@ -90,10 +102,11 @@ poll_once() {
     idle=$(opt @agent-radar-idle-seconds 3)
     valid_number "$idle" || idle=3
     allow=,$(opt @agent-radar-processes 'pi,claude,codex,opencode,aider,cursor'),
-    # Working-chrome pattern (ERE, matched byte-wise under LC_ALL=C). Default is
-    # the braille spinner glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/claude/
-    # codex animate while busy; it never appears in quoted transcript text.
-    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]')")
+    # Working-indicator pattern (ERE, matched byte-wise under LC_ALL=C). Default
+    # matches the braille progress glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/
+    # claude/codex animate, OR opencode's 4+-long square progress bar (U+25A0/
+    # U+2B1D); neither appears in quoted transcript text.
+    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}')")
     present_panes=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
     records_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
     "$store_cmd" records > "$records_file"
@@ -159,7 +172,7 @@ start() {
     fi
 
     pid_set "$$"
-    trap 'pid_unset; exit 0' INT TERM HUP
+    trap 'pid_unset "$$"; exit 0' INT TERM HUP
 
     while tmux display-message -p '#{pid}' >/dev/null 2>&1; do
         started=$(date +%s)
@@ -170,7 +183,7 @@ start() {
         [ "$elapsed" -lt "$interval" ] && sleep $((interval - elapsed))
     done
 
-    pid_unset
+    pid_unset "$$"
 }
 
 stop() {

@@ -12,12 +12,13 @@ harness, not just the ones with hooks.
 - **Detects agent panes** — any tmux pane whose foreground process matches the
   allowlist (`pi,claude,codex,opencode,aider,cursor` by default).
 - **Notices when an agent stops** — polls each agent pane and looks for the
-  agent's live "working" spinner (the animated braille glyph pi/claude/codex
-  show while busy). A pane is `working` while that spinner is on screen and
-  flips to `stopped` when it's gone for N seconds. The spinner only exists
-  while the agent animates it, so typing, editing, or even a transcript that
-  quotes the words "Working..." can't be mistaken for a working agent. "Done" and
-  "waiting for input" both mean the same thing: go look.
+  harness's live working indicator (the animated braille glyph pi/claude/codex
+  show, or opencode's pulsing square progress bar). A pane is `working` while
+  that indicator is on screen and flips to `stopped` when it's gone for N
+  seconds. The indicator only exists while the harness animates it, so typing,
+  editing, or even a transcript that quotes the words "Working..." can't be
+  mistaken for a working agent. "Done" and "waiting for input" both mean the same
+  thing: go look.
 - **Notifies you** — a macOS notification fires once per stop transition (via
   `osascript`), backed by a persistent status-left segment listing sessions
   with a stopped agent, marked seen when you focus that session.
@@ -60,7 +61,7 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-processes` | `pi,claude,codex,opencode,aider,cursor` | Comma-separated agent executable names to detect |
 | `@agent-radar-idle-seconds` | `3` | Seconds with no working indicator before a pane is "stopped" (the one calibration knob) |
 | `@agent-radar-poll-interval` | `2` | Seconds between poll cycles |
-| `@agent-radar-working-pattern` | braille spinner glyph | ERE for an agent's live "working" chrome, matched byte-wise; defaults to the braille spinner pi/claude/codex animate while busy. Override for agents that use a different indicator |
+| `@agent-radar-working-pattern` | braille + square-bar glyphs | ERE for an agent's live working indicator, matched byte-wise; defaults to the braille glyph (pi/claude/codex) or opencode's square progress bar. Override for agents that use a different indicator |
 | `@agent-radar-key` | `a` | Prefix key that opens the navigator popup |
 | `@agent-radar-popup-width` | `40%` | Popup width |
 | `@agent-radar-popup-height` | `30%` | Popup height |

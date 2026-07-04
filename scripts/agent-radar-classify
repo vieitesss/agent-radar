@@ -29,7 +29,12 @@ awk -F '|' -v now="$now" '
     age = ""
     if (state == "stopped" && stopped_at ~ /^[0-9]+$/) {
         delta = now - stopped_at
-        age = delta < 60 ? delta "s" : int(delta / 60) "m"
+        # ponytail: 2h cap past which the exact age stops mattering; raise cap_secs to widen the hours band
+        cap_secs = 7200
+        if (delta >= cap_secs)   age = "\342\210\236"          # infinity, stopped ages ago
+        else if (delta >= 3600)  age = int(delta / 3600) "h"
+        else if (delta >= 60)    age = int(delta / 60) "m"
+        else                     age = delta "s"
     }
 
     print tier "|" age "|" sortkey "|" pane "|" agent "|" target "|" state "|" stopped_at "|" seen_at
