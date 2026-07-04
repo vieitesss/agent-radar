@@ -1,4 +1,4 @@
-<p align="center"><video src="https://github.com/user-attachments/assets/f81af998-0c17-44ae-880e-95f343bc1bb2" controls muted loop></video></p>
+<p align="center"><img src="assets/showcase.gif" alt="agent-radar showcase" /></p>
 
 # agent-radar
 
