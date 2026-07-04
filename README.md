@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/example.png" alt="agent-radar example"></p>
+<p align="center"><img src="assets/preview.png" alt="agent-radar example"></p>
 
 # agent-radar
 
