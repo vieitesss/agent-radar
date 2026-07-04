@@ -26,10 +26,11 @@ An agent pane that has shown no working spinner for the idle threshold. Means
 _Avoid_: idle, done, finished
 
 **Unseen-stopped**:
-A stopped agent you have not focused since it stopped. The top-priority tier in
-the navigator (red dot) — the agents that actually need you.
+A stopped agent whose own pane you have not focused since it stopped. The
+top-priority tier in the navigator (red dot) — the agents that actually need
+you. Being elsewhere in its session (a different pane) does not clear it.
 
 **Seen-stopped**:
-A stopped agent whose session you focused after it stopped, marking it handled.
-The bottom tier in the navigator (green dot).
+A stopped agent whose exact pane you focused after it stopped, marking it
+handled. The bottom tier in the navigator (green dot).
 _Avoid_: dismissed, acknowledged

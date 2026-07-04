@@ -16,11 +16,11 @@ harness, not just the ones with hooks.
   show while busy). A pane is `working` while that spinner is on screen and
   flips to `stopped` when it's gone for N seconds. The spinner only exists
   while the agent animates it, so typing, editing, or even a transcript that
-  quotes the words "Working..." can't be mistaken for a busy agent. "Done" and
+  quotes the words "Working..." can't be mistaken for a working agent. "Done" and
   "waiting for input" both mean the same thing: go look.
 - **Notifies you** — a macOS notification fires once per stop transition (via
   `osascript`), backed by a persistent status-left segment listing sessions
-  with a stopped agent, dismissed when you focus that session.
+  with a stopped agent, marked seen when you focus that session.
 - **Navigates** — `prefix + A` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
   running, seen-stopped) and stopped age. The list refreshes while open. Pick
@@ -30,7 +30,9 @@ harness, not just the ones with hooks.
 
 - `tmux`
 - `fzf` (for the navigator popup)
-- macOS for OS notifications (`osascript`); everything else is cross-platform.
+- OS notifications use `osascript` on macOS and `notify-send` on Linux; if
+  neither is present, the status segment still works. Everything else is
+  cross-platform.
 
 ## Install
 

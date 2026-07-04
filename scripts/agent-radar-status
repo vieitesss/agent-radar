@@ -51,8 +51,14 @@ while IFS='|' read -r pane target stopped_at seen_at; do
     session=${target%%:*}
 
     if [ -n "$current_session" ] && [ "$session" = "$current_session" ]; then
-        tmux set-environment -g "$(key "$pane" SEEN_STOPPED_AT)" "$stopped_at"
-        continue
+        # Dismiss only when the session's focused pane IS the agent pane. Being
+        # elsewhere in the session (wrong pane) doesn't mean you've looked at it,
+        # so it stays unseen/highlighted until you land on the actual pane.
+        active_pane=$(tmux display-message -p -t "$current_session" '#{pane_id}' 2>/dev/null || true)
+        if [ "$active_pane" = "$pane" ]; then
+            tmux set-environment -g "$(key "$pane" SEEN_STOPPED_AT)" "$stopped_at"
+            continue
+        fi
     fi
 
     [ "$seen_at" = "$stopped_at" ] || printf '%s\n' "$session" >> "$unseen"

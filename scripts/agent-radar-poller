@@ -22,7 +22,7 @@ unset_key() {
 
 clear_pane() {
     pane=$1
-    for suffix in AGENT TARGET HASH LAST_CHANGE ARMED STATE STOPPED_AT SEEN_STOPPED_AT; do
+    for suffix in AGENT TARGET LAST_CHANGE ARMED STATE STOPPED_AT SEEN_STOPPED_AT; do
         unset_key "$(key "$pane" "$suffix")"
     done
 }
@@ -52,16 +52,6 @@ unset_store_key() {
     unset_key "$1"
 }
 
-hash_bytes() {
-    if command -v shasum >/dev/null 2>&1; then
-        shasum -a 256
-    elif command -v sha256sum >/dev/null 2>&1; then
-        sha256sum
-    else
-        cksum
-    fi | awk '{print $1}'
-}
-
 # True when the pane visibly shows agent "working" chrome. This is how herdr
 # does it: match the live working *spinner*, not a screen diff and not text
 # hints. The braille spinner glyph only exists while the agent animates it, so
@@ -89,14 +79,17 @@ agent_for_tty() {
 }
 
 notify_stopped() {
-    [ "$(uname -s 2>/dev/null || true)" = Darwin ] || return 0
-    command -v osascript >/dev/null 2>&1 || return 0
-
-    osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 &
+    if [ "$(uname -s 2>/dev/null || true)" = Darwin ] && command -v osascript >/dev/null 2>&1; then
+        osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 &
 on run argv
   display notification (item 2 of argv) with title ("agent-radar: " & item 1 of argv & " stopped")
 end run
 APPLESCRIPT
+        return 0
+    fi
+
+    command -v notify-send >/dev/null 2>&1 || return 0
+    notify-send "agent-radar: $1 stopped" "$2" >/dev/null 2>&1 &
 }
 
 valid_number() {
@@ -115,7 +108,7 @@ poll_once() {
     # the braille spinner glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/claude/
     # codex animate while busy; it never appears in quoted transcript text.
     work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]')")
-    active=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
+    present_panes=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
     store=$(mktemp "${TMPDIR:-/tmp}/agent-radar-store.XXXXXX") || exit 1
     tmux show-environment -g 2>/dev/null > "$store" || true
 
@@ -126,7 +119,7 @@ poll_once() {
 
         working=0
         if detect_working "$pane"; then working=1; fi
-        printf '%s\n' "$pane" >> "$active"
+        printf '%s\n' "$pane" >> "$present_panes"
 
         last=$(store_val "$(key "$pane" LAST_CHANGE)" || true)
         armed=$(store_val "$(key "$pane" ARMED)" || true)
@@ -144,19 +137,19 @@ poll_once() {
             set_key "$(key "$pane" STATE)" running
             unset_store_key "$(key "$pane" STOPPED_AT)"
         elif [ -z "$state" ]; then
-            # First sighting and not working: it was already idle when we arrived,
-            # so don't arm — nothing to announce.
+            # First sighting and not working: it was already stopped when we
+            # arrived, so don't arm — nothing to announce.
             set_key "$(key "$pane" LAST_CHANGE)" "$now"
             set_key "$(key "$pane" ARMED)" 0
             set_key "$(key "$pane" STATE)" running
         elif [ $((now - last)) -ge "$idle" ] && [ "$state" != stopped ]; then
             set_key "$(key "$pane" STATE)" stopped
             set_key "$(key "$pane" STOPPED_AT)" "$last"
-            # State = stopped for ANY idle agent pane (the map's definition). The
-            # toast is narrower: only a real working->idle transition (ARMED).
+            # State = stopped for ANY stopped agent pane (the map's definition).
+            # The toast is narrower: only a real working->stopped transition (ARMED).
             # ponytail: no active-pane guard — tmux "active pane" != OS focus, so
             # guarding on it swallowed exactly the toasts you want while away. The
-            # status segment already covers the "you're here" case (dismiss-on-focus).
+            # status segment already covers the "you're here" case (seen-on-focus).
             if [ "${armed:-0}" = 1 ]; then
                 notify_stopped "$agent" "$target"
             fi
@@ -167,10 +160,10 @@ poll_once() {
     sort -u |
     while IFS= read -r pane; do
         [ -n "$pane" ] || continue
-        grep -Fx "$pane" "$active" >/dev/null 2>&1 || clear_pane "$pane"
+        grep -Fx "$pane" "$present_panes" >/dev/null 2>&1 || clear_pane "$pane"
     done
 
-    rm -f "$active" "$store"
+    rm -f "$present_panes" "$store"
 }
 
 start() {
