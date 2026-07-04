@@ -20,7 +20,8 @@ harness, not just the ones with hooks.
   `osascript`), backed by a persistent status-left segment listing sessions
   with a stopped agent, dismissed when you focus that session.
 - **Navigates** — `prefix + A` opens an fzf popup listing all agent panes,
-  stopped ones first, with a green/yellow status dot and stopped age. Pick one
+  stopped ones first, with a red/yellow/green status dot (unseen-stopped,
+  running, seen-stopped) and stopped age. Pick one
   and it jumps to that exact `session:window.pane`.
 
 ## Requirements

@@ -24,13 +24,30 @@ function remember(suffix, arr, key, val, pane) {
     remember("TARGET", target, key, val)
     remember("STATE", state, key, val)
     remember("STOPPED_AT", stopped_at, key, val)
+    remember("SEEN_STOPPED_AT", seen_at, key, val)
 }
 END {
     for (pane in panes) {
         if (agent[pane] == "" || target[pane] == "") continue
         s = state[pane] == "" ? "running" : state[pane]
-        sort_key = s == "stopped" ? 0 : 1
-        dot = s == "stopped" ? "\033[32m●\033[0m" : "\033[33m●\033[0m"
+        # Three tiers: unseen-stopped (needs you) > running > seen-stopped
+        # (focused after stopping = handled). seen when SEEN_STOPPED_AT caught
+        # up to STOPPED_AT (set by agent-radar-status on session focus).
+        if (s == "stopped") {
+            seen = (seen_at[pane] != "" && seen_at[pane] == stopped_at[pane])
+            tier = seen ? 2 : 0
+            dot = seen ? "\033[32m●\033[0m" : "\033[31m●\033[0m"
+        } else {
+            tier = 1
+            dot = "\033[33m●\033[0m"
+        }
+        # Secondary sort, compared only within a tier (rows partition on tier
+        # first). Unseen: oldest-first, so zero-pad stopped_at for lexical=numeric
+        # ascending. Running + seen: alphabetical by target.
+        if (tier == 0 && stopped_at[pane] ~ /^[0-9]+$/)
+            sortkey = sprintf("%012d", stopped_at[pane])
+        else
+            sortkey = target[pane]
         age = ""
         if (s == "stopped" && stopped_at[pane] ~ /^[0-9]+$/) {
             delta = now - stopped_at[pane]
@@ -38,10 +55,10 @@ END {
         }
         display = dot " " agent[pane] " " target[pane]
         if (age != "") display = display " " age
-        print sort_key "|" display "|" pane "|" target[pane]
+        print tier "|" sortkey "|" display "|" pane
     }
 }' |
-    sort -t '|' -k1,1n -k4,4
+    sort -t '|' -k1,1n -k2,2
 )
 
 [ -n "$rows" ] || { tmux display-message 'agent-radar: no agent panes'; exit 0; }
@@ -49,11 +66,11 @@ END {
 selected=$(
     printf '%s\n' "$rows" |
     FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= fzf --ansi --layout=reverse \
-        --delimiter='|' --with-nth=2 || true
+        --delimiter='|' --with-nth=3 || true
 )
 [ -n "$selected" ] || exit 0
 
-pane=$(printf '%s' "$selected" | awk -F '|' '{print $3}')
+pane=$(printf '%s' "$selected" | awk -F '|' '{print $4}')
 session=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
 window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
 
