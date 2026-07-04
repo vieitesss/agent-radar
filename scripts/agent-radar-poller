@@ -1,0 +1,209 @@
+#!/usr/bin/env sh
+set -eu
+
+command -v tmux >/dev/null 2>&1 || exit 0
+
+opt() {
+    v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
+    [ -n "$v" ] && printf '%s\n' "$v" || printf '%s\n' "$2"
+}
+
+env_val() {
+    tmux show-environment -g "$1" 2>/dev/null | sed 's/^[^=]*=//' || true
+}
+
+key() {
+    printf 'TMUX_AGENT_RADAR_PANE_%s_%s' "$1" "$2"
+}
+
+unset_key() {
+    tmux set-environment -gu "$1" 2>/dev/null || true
+}
+
+clear_pane() {
+    pane=$1
+    for suffix in AGENT TARGET HASH LAST_CHANGE ARMED STATE STOPPED_AT SEEN_STOPPED_AT; do
+        unset_key "$(key "$pane" "$suffix")"
+    done
+}
+
+store_val() {
+    name=$1
+    [ -n "${store:-}" ] && [ -f "$store" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in
+            "$name="*) printf '%s\n' "${line#*=}"; return 0 ;;
+        esac
+    done < "$store"
+    return 1
+}
+
+set_key() {
+    name=$1
+    value=$2
+    if current=$(store_val "$name"); then
+        [ "$current" = "$value" ] && return 0
+    fi
+    tmux set-environment -g "$name" "$value"
+}
+
+unset_store_key() {
+    store_val "$1" >/dev/null || return 0
+    unset_key "$1"
+}
+
+hash_bytes() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum
+    else
+        cksum
+    fi | awk '{print $1}'
+}
+
+# True when the pane visibly shows agent "working" chrome. This is how herdr
+# does it: match the live working *spinner*, not a screen diff and not text
+# hints. The braille spinner glyph only exists while the agent animates it, so
+# it can't collide with transcript prose that merely quotes "Working..." or
+# "esc to interrupt" (that quoting is exactly what produced false positives).
+# Matched byte-wise under LC_ALL=C so it's locale-proof: any braille codepoint
+# U+2800-U+28FF is E2 followed by A0-A3, and box-drawing (E2 94..) can't match.
+# ponytail: an agent whose busy indicator isn't a braille spinner won't be
+# detected -- override @agent-radar-working-pattern with its own marker.
+detect_working() {
+    LC_ALL=C tmux capture-pane -epJ -t "$1" 2>/dev/null | LC_ALL=C grep -qE "$work_re"
+}
+
+agent_for_tty() {
+    tty=${1#/dev/}
+    allow=$2
+
+    ps -t "$tty" -o comm= 2>/dev/null | while IFS= read -r comm; do
+        name=${comm##*/}
+        name=${name#-}
+        case "$allow" in
+            *",$name,"*) printf '%s\n' "$name"; exit 0 ;;
+        esac
+    done
+}
+
+notify_stopped() {
+    [ "$(uname -s 2>/dev/null || true)" = Darwin ] || return 0
+    command -v osascript >/dev/null 2>&1 || return 0
+
+    osascript - "$1" "$2" <<'APPLESCRIPT' >/dev/null 2>&1 &
+on run argv
+  display notification (item 2 of argv) with title ("agent-radar: " & item 1 of argv & " stopped")
+end run
+APPLESCRIPT
+}
+
+valid_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+poll_once() {
+    now=$(date +%s)
+    idle=$(opt @agent-radar-idle-seconds 3)
+    valid_number "$idle" || idle=3
+    allow=,$(opt @agent-radar-processes 'pi,claude,codex,opencode,aider,cursor'),
+    # Working-chrome pattern (ERE, matched byte-wise under LC_ALL=C). Default is
+    # the braille spinner glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/claude/
+    # codex animate while busy; it never appears in quoted transcript text.
+    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]')")
+    active=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
+    store=$(mktemp "${TMPDIR:-/tmp}/agent-radar-store.XXXXXX") || exit 1
+    tmux show-environment -g 2>/dev/null > "$store" || true
+
+    tmux list-panes -a -F '#{pane_id}|#{session_name}:#{window_index}.#{pane_index}|#{pane_tty}' 2>/dev/null |
+    while IFS='|' read -r pane target tty; do
+        agent=$(agent_for_tty "$tty" "$allow" || true)
+        [ -n "$agent" ] || continue
+
+        working=0
+        if detect_working "$pane"; then working=1; fi
+        printf '%s\n' "$pane" >> "$active"
+
+        last=$(store_val "$(key "$pane" LAST_CHANGE)" || true)
+        armed=$(store_val "$(key "$pane" ARMED)" || true)
+        state=$(store_val "$(key "$pane" STATE)" || true)
+        valid_number "$last" || last=$now
+
+        set_key "$(key "$pane" AGENT)" "$agent"
+        set_key "$(key "$pane" TARGET)" "$target"
+
+        if [ "$working" = 1 ]; then
+            # Agent is visibly working: keep it running and arm the toast so the
+            # eventual working->idle transition fires exactly once.
+            set_key "$(key "$pane" LAST_CHANGE)" "$now"
+            set_key "$(key "$pane" ARMED)" 1
+            set_key "$(key "$pane" STATE)" running
+            unset_store_key "$(key "$pane" STOPPED_AT)"
+        elif [ -z "$state" ]; then
+            # First sighting and not working: it was already idle when we arrived,
+            # so don't arm — nothing to announce.
+            set_key "$(key "$pane" LAST_CHANGE)" "$now"
+            set_key "$(key "$pane" ARMED)" 0
+            set_key "$(key "$pane" STATE)" running
+        elif [ $((now - last)) -ge "$idle" ] && [ "$state" != stopped ]; then
+            set_key "$(key "$pane" STATE)" stopped
+            set_key "$(key "$pane" STOPPED_AT)" "$last"
+            # State = stopped for ANY idle agent pane (the map's definition). The
+            # toast is narrower: only a real working->idle transition (ARMED).
+            # ponytail: no active-pane guard — tmux "active pane" != OS focus, so
+            # guarding on it swallowed exactly the toasts you want while away. The
+            # status segment already covers the "you're here" case (dismiss-on-focus).
+            if [ "${armed:-0}" = 1 ]; then
+                notify_stopped "$agent" "$target"
+            fi
+        fi
+    done
+
+    awk -F= '/^TMUX_AGENT_RADAR_PANE_/ { pane=$1; sub(/^TMUX_AGENT_RADAR_PANE_/, "", pane); sub(/_.*/, "", pane); print pane }' "$store" |
+    sort -u |
+    while IFS= read -r pane; do
+        [ -n "$pane" ] || continue
+        grep -Fx "$pane" "$active" >/dev/null 2>&1 || clear_pane "$pane"
+    done
+
+    rm -f "$active" "$store"
+}
+
+start() {
+    existing=$(env_val TMUX_AGENT_RADAR_PID)
+    if [ -n "$existing" ] && kill -0 "$existing" 2>/dev/null; then
+        exit 0
+    fi
+
+    tmux set-environment -g TMUX_AGENT_RADAR_PID "$$"
+    trap 'tmux set-environment -gu TMUX_AGENT_RADAR_PID 2>/dev/null || true; exit 0' INT TERM HUP
+
+    while tmux display-message -p '#{pid}' >/dev/null 2>&1; do
+        started=$(date +%s)
+        poll_once
+        interval=$(opt @agent-radar-poll-interval 2)
+        valid_number "$interval" || interval=2
+        elapsed=$(($(date +%s) - started))
+        [ "$elapsed" -lt "$interval" ] && sleep $((interval - elapsed))
+    done
+
+    tmux set-environment -gu TMUX_AGENT_RADAR_PID 2>/dev/null || true
+}
+
+stop() {
+    existing=$(env_val TMUX_AGENT_RADAR_PID)
+    [ -n "$existing" ] && kill "$existing" 2>/dev/null || true
+    tmux set-environment -gu TMUX_AGENT_RADAR_PID 2>/dev/null || true
+}
+
+case "${1:-start}" in
+    start) start ;;
+    once) poll_once ;;
+    stop) stop ;;
+    restart) stop; start ;;
+    *) echo "usage: $0 [start|once|stop|restart]" >&2; exit 2 ;;
+esac

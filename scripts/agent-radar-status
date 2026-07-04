@@ -1,0 +1,84 @@
+#!/usr/bin/env sh
+set -eu
+
+command -v tmux >/dev/null 2>&1 || exit 0
+tmux display-message -p '#{session_name}' >/dev/null 2>&1 || exit 0
+
+current_session=${1:-}
+rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-status.XXXXXX") || exit 1
+unseen=$(mktemp "${TMPDIR:-/tmp}/agent-radar-unseen.XXXXXX") || exit 1
+trap 'rm -f "$rows" "$unseen"' EXIT INT TERM HUP
+
+opt() {
+    v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
+    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
+}
+
+key() {
+    printf 'TMUX_AGENT_RADAR_PANE_%s_%s' "$1" "$2"
+}
+
+tmux show-environment -g 2>/dev/null |
+awk -F= '
+function remember(suffix, arr, key, val, pane) {
+    if (key ~ ("_" suffix "$")) {
+        pane = key
+        sub(/^TMUX_AGENT_RADAR_PANE_/, "", pane)
+        sub("_" suffix "$", "", pane)
+        arr[pane] = val
+        panes[pane] = 1
+    }
+}
+{
+    key = $1
+    val = $0
+    sub(/^[^=]*=/, "", val)
+    remember("TARGET", target, key, val)
+    remember("STATE", state, key, val)
+    remember("STOPPED_AT", stopped_at, key, val)
+    remember("SEEN_STOPPED_AT", seen_at, key, val)
+}
+END {
+    for (pane in panes) {
+        if (state[pane] == "stopped" && target[pane] != "" && stopped_at[pane] != "") {
+            print pane "|" target[pane] "|" stopped_at[pane] "|" seen_at[pane]
+        }
+    }
+}' > "$rows"
+
+while IFS='|' read -r pane target stopped_at seen_at; do
+    [ -n "${pane:-}" ] || continue
+    session=${target%%:*}
+
+    if [ -n "$current_session" ] && [ "$session" = "$current_session" ]; then
+        tmux set-environment -g "$(key "$pane" SEEN_STOPPED_AT)" "$stopped_at"
+        continue
+    fi
+
+    [ "$seen_at" = "$stopped_at" ] || printf '%s\n' "$session" >> "$unseen"
+done < "$rows"
+
+if ! grep -q . "$unseen" 2>/dev/null; then
+    exit 0
+fi
+
+label=$(opt @agent-radar-status-label agents)
+color=$(opt @agent-radar-status-color yellow)
+out=
+sep=
+
+while IFS= read -r session; do
+    [ -n "$session" ] || continue
+    count=$(grep -Fx "$session" "$unseen" 2>/dev/null | wc -l | tr -d ' ')
+    [ "$count" -gt 0 ] || continue
+
+    name=$session
+    [ "$count" -gt 1 ] && name="$session×$count"
+    out=${out}${sep}${name}
+    sep=' / '
+done <<EOF
+$(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+EOF
+
+[ -n "$out" ] || exit 0
+printf '#[fg=%s][%s - %s]#[default]' "$color" "$label" "$out"

@@ -1,0 +1,64 @@
+#!/usr/bin/env sh
+set -eu
+
+command -v tmux >/dev/null 2>&1 || exit 0
+command -v fzf >/dev/null 2>&1 || { tmux display-message 'agent-radar: fzf not found'; exit 0; }
+
+rows=$(
+    tmux show-environment -g 2>/dev/null |
+    awk -F= -v now="$(date +%s)" '
+function remember(suffix, arr, key, val, pane) {
+    if (key ~ ("_" suffix "$")) {
+        pane = key
+        sub(/^TMUX_AGENT_RADAR_PANE_/, "", pane)
+        sub("_" suffix "$", "", pane)
+        arr[pane] = val
+        panes[pane] = 1
+    }
+}
+{
+    key = $1
+    val = $0
+    sub(/^[^=]*=/, "", val)
+    remember("AGENT", agent, key, val)
+    remember("TARGET", target, key, val)
+    remember("STATE", state, key, val)
+    remember("STOPPED_AT", stopped_at, key, val)
+}
+END {
+    for (pane in panes) {
+        if (agent[pane] == "" || target[pane] == "") continue
+        s = state[pane] == "" ? "running" : state[pane]
+        sort_key = s == "stopped" ? 0 : 1
+        dot = s == "stopped" ? "\033[32m●\033[0m" : "\033[33m●\033[0m"
+        age = ""
+        if (s == "stopped" && stopped_at[pane] ~ /^[0-9]+$/) {
+            delta = now - stopped_at[pane]
+            age = delta < 60 ? delta "s" : int(delta / 60) "m"
+        }
+        display = dot " " agent[pane] " " target[pane]
+        if (age != "") display = display " " age
+        print sort_key "|" display "|" pane "|" target[pane]
+    }
+}' |
+    sort -t '|' -k1,1n -k4,4
+)
+
+[ -n "$rows" ] || { tmux display-message 'agent-radar: no agent panes'; exit 0; }
+
+selected=$(
+    printf '%s\n' "$rows" |
+    FZF_DEFAULT_OPTS= FZF_DEFAULT_OPTS_FILE= fzf --ansi --layout=reverse \
+        --delimiter='|' --with-nth=2 || true
+)
+[ -n "$selected" ] || exit 0
+
+pane=$(printf '%s' "$selected" | awk -F '|' '{print $3}')
+session=$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)
+window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null || true)
+
+[ -n "$session" ] && [ -n "$window" ] || { tmux display-message 'agent-radar: pane disappeared'; exit 0; }
+
+tmux switch-client -t "$session"
+tmux select-window -t "$window"
+tmux select-pane -t "$pane"
