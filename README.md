@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/example.png" alt="agent-radar example"></p>
+
 # agent-radar
 
 A self-contained tmux plugin that gives you the one [herdr](https://github.com/ogulcancelik/herdr) feature worth having
