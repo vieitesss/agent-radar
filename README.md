@@ -1,4 +1,4 @@
-<p align="center"><video src="assets/showcase.mp4" controls muted loop></video></p>
+![video](assets/showcase.mp4)
 
 # agent-radar
 
