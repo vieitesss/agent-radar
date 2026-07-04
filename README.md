@@ -61,9 +61,9 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-idle-seconds` | `3` | Seconds with no working indicator before a pane is "stopped" (the one calibration knob) |
 | `@agent-radar-poll-interval` | `2` | Seconds between poll cycles |
 | `@agent-radar-working-pattern` | braille spinner glyph | ERE for an agent's live "working" chrome, matched byte-wise; defaults to the braille spinner pi/claude/codex animate while busy. Override for agents that use a different indicator |
-| `@agent-radar-key` | `A` | Prefix key that opens the navigator popup |
-| `@agent-radar-popup-width` | `90%` | Popup width |
-| `@agent-radar-popup-height` | `80%` | Popup height |
+| `@agent-radar-key` | `a` | Prefix key that opens the navigator popup |
+| `@agent-radar-popup-width` | `40%` | Popup width |
+| `@agent-radar-popup-height` | `30%` | Popup height |
 | `@agent-radar-popup-position` | `C` | Popup position: `C`, `x,y`, or corner shorthand (`tl`/`tr`/`bl`/`br`) |
 | `@agent-radar-status-label` | `agents` | Label in the status segment |
 | `@agent-radar-status-color` | `yellow` | Color of the status segment |

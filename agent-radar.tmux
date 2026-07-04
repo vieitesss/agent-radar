@@ -4,9 +4,9 @@ set -eu
 current_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
 
 # Options:
-#   @agent-radar-key=A
-#   @agent-radar-popup-width=90%
-#   @agent-radar-popup-height=80%
+#   @agent-radar-key=a
+#   @agent-radar-popup-width=40%
+#   @agent-radar-popup-height=30%
 #   @agent-radar-popup-position=C (or x,y; corners: top-left/tl, top-right/tr, bottom-left/bl, bottom-right/br)
 opt() {
     v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
@@ -23,9 +23,9 @@ esac
 
 tmux set-option -gq @agent-radar-plugin-dir "$current_dir"
 
-popup_key=$(opt @agent-radar-key A)
-popup_width=$(opt @agent-radar-popup-width '90%')
-popup_height=$(opt @agent-radar-popup-height '80%')
+popup_key=$(opt @agent-radar-key a)
+popup_width=$(opt @agent-radar-popup-width '40%')
+popup_height=$(opt @agent-radar-popup-height '30%')
 popup_position=$(opt @agent-radar-popup-position C)
 popup_x=C
 popup_y=C
