@@ -4,26 +4,21 @@
 
 A self-contained tmux plugin that gives you the one [herdr](https://github.com/ogulcancelik/herdr) feature worth having
 without leaving tmux: see every running coding agent, jump straight to the pane
-it lives in, and get told the moment any agent stops needing you — for *any*
+it lives in, and get told the moment any agent stops needing you, for *any*
 harness, not just the ones with hooks.
 
 ## What it does
 
-- **Detects agent panes** — any tmux pane whose foreground process matches the
+- **Detects agent panes**: any tmux pane whose foreground process matches the
   allowlist (`pi,claude,codex,opencode,aider,cursor` by default).
-- **Notices when an agent stops** — polls each agent pane and looks for the
-  harness's live working indicator (the animated braille glyph pi/claude/codex
-  show, or opencode's pulsing square progress bar). A pane is `working` while
-  that indicator is on screen and flips to `stopped` when it's gone for N
-  seconds. The indicator only exists while the harness animates it, so typing,
-  editing, or even a transcript that quotes the words "Working..." can't be
-  mistaken for a working agent. "Done" and "waiting for input" both mean the same
-  thing: go look.
-- **Notifies you** — a macOS notification fires once per stop transition (via
-  `osascript`), backed by a persistent status-left segment listing sessions
-  with a stopped agent and a highlighted tmux window until you focus the exact
-  agent pane.
-- **Navigates** — `prefix + A` opens an fzf popup listing all agent panes,
+- **Notices when an agent stops**: polls each agent pane and looks for the
+  harness's live working indicator. A pane is `working` while that indicator
+  is on screen and flips to `stopped` when it's gone for N seconds.
+- **Notifies you**: an OS notification fires once per stop transition (via
+  `osascript` on macOS, `notify-send` on Linux), backed by a persistent status-left
+  segment listing sessions with a stopped agent and a highlighted tmux window
+  until you focus the exact agent pane.
+- **Navigates** — `prefix + a` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
   running, seen-stopped) and stopped age. The list refreshes while open. Pick
   one and it jumps to that exact `session:window.pane`.
@@ -38,18 +33,21 @@ harness, not just the ones with hooks.
 
 ## Install
 
-Add to `~/.tmux.conf`:
+Clone the repo:
 
-```tmux
-run-shell /path/to/tmux/plugins/agent-radar/agent-radar.tmux
+```sh
+git clone https://github.com/vieitesss/agent-radar.git ~/.tmux/plugins/agent-radar
 ```
 
-In this repo it's installed via the OS manifest symlinks; the line above is
-what a standalone install looks like. Reload tmux afterwards.
+Then add to `~/.tmux.conf`:
+
+```tmux
+run-shell ~/.tmux/plugins/agent-radar/agent-radar.tmux
+```
 
 ## Usage
 
-- `prefix + A` — open the navigator popup, select an agent, jump to its pane.
+- `prefix + a`: open the navigator popup, select an agent, jump to its pane.
 - The status-left segment shows sessions with an unseen stopped agent, e.g.
   `[agents - work / build×2]`; those tmux windows are highlighted until you
   focus the exact agent pane.
