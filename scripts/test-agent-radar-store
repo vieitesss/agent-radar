@@ -1,0 +1,52 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+store=$script_dir/agent-radar-store
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-store-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+fixture=$tmp/env
+log=$tmp/tmux.log
+cat > "$fixture" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%2_TARGET=other:1.0
+TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%1_SEEN_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%1_TARGET=work:0.1
+TMUX_AGENT_RADAR_PANE_%1_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%1_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%2_STATE=running
+TMUX_AGENT_RADAR_PANE_%1_LAST_CHANGE=100
+TMUX_AGENT_RADAR_PANE_%1_ARMED=1
+TMUX_AGENT_RADAR_PANE_%2_AGENT=claude
+EOF
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1 $2" in
+    'set-environment -g') printf 'set %s=%s\n' "$3" "$4" >> "$TMUX_LOG" ;;
+    'set-environment -gu') printf 'unset %s\n' "$3" >> "$TMUX_LOG" ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin/tmux"
+
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$store" records > "$tmp/records"
+cat > "$tmp/expected" <<'EOF'
+%1|pi|work:0.1|100|1|stopped|100|100
+%2|claude|other:1.0|||running||
+EOF
+diff -u "$tmp/expected" "$tmp/records"
+
+: > "$log"
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$store" set %1 state stopped
+[ ! -s "$log" ] || { echo 'unchanged set wrote to tmux' >&2; exit 1; }
+
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$store" set %2 stopped_at ""
+[ ! -s "$log" ] || { echo 'absent empty set wrote to tmux' >&2; exit 1; }
+
+PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$store" set %1 state running
+grep -Fx 'set TMUX_AGENT_RADAR_PANE_%1_STATE=running' "$log" >/dev/null
+
+printf 'agent-radar-store ok\n'

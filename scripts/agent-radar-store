@@ -1,0 +1,139 @@
+#!/usr/bin/env sh
+set -eu
+
+fields='AGENT TARGET LAST_CHANGE ARMED STATE STOPPED_AT SEEN_STOPPED_AT'
+
+usage() {
+    echo "usage: $0 records | set <pane> <field> <value> | clear <pane>" >&2
+    exit 2
+}
+
+field_info() {
+    want=$1
+    field=$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')
+    i=2
+    for name in $fields; do
+        if [ "$field" = "$name" ]; then
+            [ "$want" = index ] && printf '%s' "$i" || printf '%s' "$name"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    return 1
+}
+
+key() {
+    printf 'TMUX_AGENT_RADAR_PANE_%s_%s' "$1" "$2"
+}
+
+env_lines() {
+    if [ -n "${AGENT_RADAR_STORE_FILE:-}" ]; then
+        cat "$AGENT_RADAR_STORE_FILE"
+        return 0
+    fi
+
+    command -v tmux >/dev/null 2>&1 || exit 0
+    tmux show-environment -g 2>/dev/null || true
+}
+
+records() {
+    env_lines |
+    awk -F= '
+{
+    key = $1
+    if (key !~ /^TMUX_AGENT_RADAR_PANE_/) next
+    val = $0
+    sub(/^[^=]*=/, "", val)
+    pane = key
+    sub(/^TMUX_AGENT_RADAR_PANE_/, "", pane)
+
+    if (pane ~ /_SEEN_STOPPED_AT$/) { sub(/_SEEN_STOPPED_AT$/, "", pane); seen_at[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_LAST_CHANGE$/) { sub(/_LAST_CHANGE$/, "", pane); last_change[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_STOPPED_AT$/) { sub(/_STOPPED_AT$/, "", pane); stopped_at[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_AGENT$/) { sub(/_AGENT$/, "", pane); agent[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_TARGET$/) { sub(/_TARGET$/, "", pane); target[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_ARMED$/) { sub(/_ARMED$/, "", pane); armed[pane] = val; panes[pane] = 1; next }
+    if (pane ~ /_STATE$/) { sub(/_STATE$/, "", pane); state[pane] = val; panes[pane] = 1; next }
+}
+END {
+    for (pane in panes)
+        print pane "|" agent[pane] "|" target[pane] "|" last_change[pane] "|" armed[pane] "|" state[pane] "|" stopped_at[pane] "|" seen_at[pane]
+}' |
+    sort -t '|' -k1,1
+}
+
+current_from_records() {
+    pane=$1
+    idx=$2
+    awk -F '|' -v pane="$pane" -v idx="$idx" '
+$1 == pane { print $idx; found = 1; exit }
+END { exit found ? 0 : 1 }
+' "$AGENT_RADAR_STORE_RECORDS_FILE"
+}
+
+current_from_env() {
+    name=$1
+    env_lines |
+    awk -F= -v name="$name" '
+$1 == name {
+    val = $0
+    sub(/^[^=]*=/, "", val)
+    print val
+    found = 1
+    exit
+}
+END { exit found ? 0 : 1 }
+'
+}
+
+current_value() {
+    pane=$1
+    field=$2
+    name=$3
+
+    if [ -n "${AGENT_RADAR_STORE_RECORDS_FILE:-}" ] && [ -f "$AGENT_RADAR_STORE_RECORDS_FILE" ]; then
+        idx=$(field_info index "$field") || return 1
+        current_from_records "$pane" "$idx"
+        return $?
+    fi
+
+    current_from_env "$name"
+}
+
+set_value() {
+    [ "$#" -eq 3 ] || usage
+    pane=$1
+    field=$2
+    value=$3
+    suffix=$(field_info suffix "$field") || usage
+    name=$(key "$pane" "$suffix")
+
+    if current=$(current_value "$pane" "$field" "$name"); then
+        [ "$current" = "$value" ] && return 0
+    elif [ -z "$value" ]; then
+        return 0
+    fi
+
+    command -v tmux >/dev/null 2>&1 || exit 0
+    if [ -z "$value" ]; then
+        tmux set-environment -gu "$name" 2>/dev/null || true
+    else
+        tmux set-environment -g "$name" "$value"
+    fi
+}
+
+clear_pane() {
+    [ "$#" -eq 1 ] || usage
+    pane=$1
+    command -v tmux >/dev/null 2>&1 || exit 0
+    for suffix in $fields; do
+        tmux set-environment -gu "$(key "$pane" "$suffix")" 2>/dev/null || true
+    done
+}
+
+case "${1:-}" in
+    records) [ "$#" -eq 1 ] || usage; records ;;
+    set) shift; set_value "$@" ;;
+    clear) shift; clear_pane "$@" ;;
+    *) usage ;;
+esac

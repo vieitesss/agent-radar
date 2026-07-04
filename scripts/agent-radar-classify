@@ -1,0 +1,36 @@
+#!/usr/bin/env sh
+set -eu
+
+now=${1:-$(date +%s)}
+
+awk -F '|' -v now="$now" '
+{
+    pane = $1
+    agent = $2
+    target = $3
+    state = $6 == "" ? "working" : $6
+    stopped_at = $7
+    seen_at = $8
+    if (agent == "" || target == "") next
+
+    if (state == "stopped") {
+        # seen = focused the pane after it stopped, i.e. SEEN_STOPPED_AT reached
+        # STOPPED_AT. The one home for this invariant (CONTEXT seen/unseen model).
+        tier = (seen_at == stopped_at) ? 2 : 0
+    } else {
+        tier = 1
+    }
+
+    if (tier == 0 && stopped_at ~ /^[0-9]+$/)
+        sortkey = sprintf("%012d", stopped_at)
+    else
+        sortkey = target
+
+    age = ""
+    if (state == "stopped" && stopped_at ~ /^[0-9]+$/) {
+        delta = now - stopped_at
+        age = delta < 60 ? delta "s" : int(delta / 60) "m"
+    }
+
+    print tier "|" age "|" sortkey "|" pane "|" agent "|" target "|" state "|" stopped_at "|" seen_at
+}'

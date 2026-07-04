@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+classify=$script_dir/agent-radar-classify
+list=$script_dir/agent-radar-list
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-classify-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+records=$tmp/records
+env=$tmp/env
+cat > "$records" <<'EOF'
+%z|pi|zeta:1.0|||stopped|90|
+%a|claude|alpha:1.0|||running||
+%b|codex|beta:1.0|||stopped|100|100
+%m|pi|middle:1.0|||stopped|95|
+EOF
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%z_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%z_TARGET=zeta:1.0
+TMUX_AGENT_RADAR_PANE_%z_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%z_STOPPED_AT=90
+TMUX_AGENT_RADAR_PANE_%a_AGENT=claude
+TMUX_AGENT_RADAR_PANE_%a_TARGET=alpha:1.0
+TMUX_AGENT_RADAR_PANE_%a_STATE=running
+TMUX_AGENT_RADAR_PANE_%b_AGENT=codex
+TMUX_AGENT_RADAR_PANE_%b_TARGET=beta:1.0
+TMUX_AGENT_RADAR_PANE_%b_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%b_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%b_SEEN_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%m_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%m_TARGET=middle:1.0
+TMUX_AGENT_RADAR_PANE_%m_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%m_STOPPED_AT=95
+EOF
+
+"$classify" 120 < "$records" > "$tmp/classified"
+cat > "$tmp/expected-classified" <<'EOF'
+0|30s|000000000090|%z|pi|zeta:1.0|stopped|90|
+1||alpha:1.0|%a|claude|alpha:1.0|running||
+2|20s|beta:1.0|%b|codex|beta:1.0|stopped|100|100
+0|25s|000000000095|%m|pi|middle:1.0|stopped|95|
+EOF
+diff -u "$tmp/expected-classified" "$tmp/classified"
+
+AGENT_RADAR_STORE_FILE=$env AGENT_RADAR_NOW=120 "$list" rows > "$tmp/list-rows"
+{
+    printf '0|000000000090|\033[31m●\033[0m pi zeta:1.0 30s|%%z\n'
+    printf '0|000000000095|\033[31m●\033[0m pi middle:1.0 25s|%%m\n'
+    printf '1|alpha:1.0|\033[33m●\033[0m claude alpha:1.0|%%a\n'
+    printf '2|beta:1.0|\033[32m●\033[0m codex beta:1.0 20s|%%b\n'
+} > "$tmp/expected-list"
+diff -u "$tmp/expected-list" "$tmp/list-rows"
+
+printf 'agent-radar-classify ok\n'
