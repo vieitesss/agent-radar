@@ -1,4 +1,4 @@
-![video](assets/showcase.mp4)
+![](assets/showcase.mp4)
 
 # agent-radar
 
