@@ -4,6 +4,10 @@ set -eu
 command -v tmux >/dev/null 2>&1 || exit 0
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
 store_cmd=$script_dir/agent-radar-store
+transition_cmd=$script_dir/agent-radar-transition
+match_cmd=$script_dir/agent-radar-match
+. "$script_dir/agent-radar-record-columns"
+eval "$(agent_radar_record_column_vars)"
 
 opt() {
     v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
@@ -27,11 +31,17 @@ pid_unset() {
 }
 
 # Read the last_change|armed|state hot-loop fields for a pane in ONE awk pass.
-# ponytail: consumes the store's own records() pipe format (key format stays in
-# the store); a per-field store subcommand would refork tmux and undo 011's
-# latency win, so the poller reads the shared records snapshot locally instead.
+# ponytail: consumes the store's shared records() pipe contract; a per-field
+# store subcommand would refork tmux and undo 011's latency win.
 record_hot() {
-    awk -F '|' -v pane="$1" '$1 == pane { print $4 "|" $5 "|" $6; exit }' "$records_file"
+    awk -F '|' \
+        -v pane="$1" \
+        -v col_pane="$agent_radar_record_col_pane" \
+        -v col_last="$agent_radar_record_col_last_change" \
+        -v col_armed="$agent_radar_record_col_armed" \
+        -v col_state="$agent_radar_record_col_state" \
+        '$col_pane == pane { print $col_last "|" $col_armed "|" $col_state; exit }' \
+        "$records_file"
 }
 
 set_pane() {
@@ -42,25 +52,9 @@ clear_pane() {
     "$store_cmd" clear "$1"
 }
 
-# True when the pane visibly shows the agent working indicator. This is how herdr
-# does it: match the live working indicator, not a screen diff and not text
-# hints. The braille progress glyph only exists while the agent animates it, so
-# it can't collide with transcript prose that merely quotes "Working..." or
-# "esc to interrupt" (that quoting is exactly what produced false positives).
-# Matched byte-wise under LC_ALL=C so it's locale-proof: any braille codepoint
-# U+2800-U+28FF is E2 followed by A0-A3, and box-drawing (E2 94..) can't match.
-# opencode doesn't animate braille; its working indicator is a pulsing progress bar
-# of filled/dim squares (U+25A0 = E2 96 A0, U+2B1D = E2 AC 9D), so the default
-# also matches a run of 4+ of those. A 4-long square run can't occur in prose.
-# ponytail: an agent whose working indicator is neither braille nor a square bar
-# won't be detected -- override @agent-radar-working-pattern with its own marker.
-# Capture WITHOUT -e (no SGR escapes): opencode colors each square of its
-# progress bar individually, so with -e the per-cell color codes split the
-# run below 4 and mixed-color frames miss -> false "stopped". Plain text keeps
-# the glyphs contiguous; braille glyphs are single-color so this is a no-op
-# for pi/claude/codex.
 detect_working() {
-    LC_ALL=C tmux capture-pane -pJ -t "$1" 2>/dev/null | LC_ALL=C grep -qE "$work_re"
+    # Capture without -e: opencode colors each square, and plain text keeps the bar contiguous.
+    LC_ALL=C tmux capture-pane -pJ -t "$1" 2>/dev/null | "$match_cmd" "$work_re"
 }
 
 agent_for_tty() {
@@ -124,35 +118,24 @@ poll_once() {
         IFS='|' read -r last armed state <<EOF
 $(record_hot "$pane")
 EOF
-        valid_number "$last" || last=$now
 
         set_pane "$pane" agent "$agent"
         set_pane "$pane" target "$target"
 
-        if [ "$working" = 1 ]; then
-            # Agent is visibly working: keep it running and arm the toast so the
-            # eventual working->idle transition fires exactly once.
-            set_pane "$pane" last_change "$now"
-            set_pane "$pane" armed 1
-            set_pane "$pane" state working
-            set_pane "$pane" stopped_at ""
-        elif [ -z "$state" ]; then
-            # First sighting and not working: it was already stopped when we
-            # arrived, so don't arm — nothing to announce.
-            set_pane "$pane" last_change "$now"
-            set_pane "$pane" armed 0
-            set_pane "$pane" state working
-        elif [ $((now - last)) -ge "$idle" ] && [ "$state" != stopped ]; then
-            set_pane "$pane" state stopped
-            set_pane "$pane" stopped_at "$last"
-            # State = stopped for ANY stopped agent pane (the map's definition).
-            # The toast is narrower: only a real working->stopped transition (ARMED).
-            # ponytail: no active-pane guard — tmux "active pane" != OS focus, so
-            # guarding on it swallowed exactly the toasts you want while away. The
-            # status segment already covers the "you're here" case (seen-on-focus).
-            if [ "${armed:-0}" = 1 ]; then
-                notify_stopped "$agent" "$target"
-            fi
+        next_state=; next_last=; next_armed=; stopped_at=; notify=
+        IFS='|' read -r next_state next_last next_armed stopped_at notify <<EOF
+$(printf '%s|%s|%s|%s|%s|%s\n' "$state" "$last" "$armed" "$working" "$now" "$idle" | "$transition_cmd")
+EOF
+
+        set_pane "$pane" last_change "$next_last"
+        set_pane "$pane" armed "$next_armed"
+        set_pane "$pane" state "$next_state"
+        set_pane "$pane" stopped_at "$stopped_at"
+        # ponytail: no active-pane guard — tmux "active pane" != OS focus, so
+        # guarding on it swallowed exactly the toasts you want while away. The
+        # status segment already covers the "you're here" case (seen-on-focus).
+        if [ "$notify" = 1 ]; then
+            notify_stopped "$agent" "$target"
         fi
     done
 

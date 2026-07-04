@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+transition=$script_dir/agent-radar-transition
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-transition-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+cat > "$tmp/input" <<'EOF'
+stopped|100|1|1|110|3
+|||0|110|3
+working|108|1|0|110|3
+working|100|1|0|103|3
+working|100|0|0|103|3
+stopped|100|1|0|110|3
+working||1|0|110|3
+EOF
+
+cat > "$tmp/expected" <<'EOF'
+working|110|1||0
+working|110|0||0
+working|108|1||0
+stopped|100|1|100|1
+stopped|100|0|100|0
+stopped|100|1|100|0
+working|110|1||0
+EOF
+
+"$transition" < "$tmp/input" > "$tmp/actual"
+diff -u "$tmp/expected" "$tmp/actual"
+
+printf 'agent-radar-transition ok\n'

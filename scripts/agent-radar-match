@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+
+[ "$#" -eq 1 ] || { echo "usage: $0 <working-pattern>" >&2; exit 2; }
+
+LC_ALL=C grep -qE -e "$1"

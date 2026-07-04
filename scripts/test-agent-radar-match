@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+matcher=$script_dir/agent-radar-match
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-match-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+pattern=$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}')
+
+printf 'thinking \342\240\201\n' > "$tmp/braille"
+printf '\342\254\235\342\226\240\342\226\240\342\254\235\n' > "$tmp/opencode"
+printf '\342\224\200\342\224\200\342\224\200\342\224\200\n' > "$tmp/box-drawing"
+printf 'transcript quotes "Working..." and "esc to interrupt"\n' > "$tmp/quoted-working"
+printf 'custom marker\n' > "$tmp/custom"
+
+assert_exit() {
+    name=$1
+    want=$2
+    pat=$3
+
+    if "$matcher" "$pat" < "$tmp/$name"; then
+        got=0
+    else
+        got=$?
+    fi
+
+    [ "$got" -eq "$want" ] || {
+        echo "$name: expected exit $want, got $got" >&2
+        exit 1
+    }
+}
+
+assert_exit braille 0 "$pattern"
+assert_exit opencode 0 "$pattern"
+assert_exit box-drawing 1 "$pattern"
+assert_exit quoted-working 1 "$pattern"
+assert_exit custom 0 'custom marker'
+
+printf 'agent-radar-match ok\n'

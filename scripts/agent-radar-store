@@ -1,7 +1,9 @@
 #!/usr/bin/env sh
 set -eu
 
-fields='AGENT TARGET LAST_CHANGE ARMED STATE STOPPED_AT SEEN_STOPPED_AT'
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+. "$script_dir/agent-radar-record-columns"
+eval "$(agent_radar_record_column_vars)"
 
 usage() {
     echo "usage: $0 records | set <pane> <field> <value> | clear <pane>" >&2
@@ -11,8 +13,8 @@ usage() {
 field_info() {
     want=$1
     field=$(printf '%s' "$2" | tr '[:lower:]' '[:upper:]')
-    i=2
-    for name in $fields; do
+    i=$((agent_radar_record_col_pane + 1))
+    for name in $agent_radar_record_fields; do
         if [ "$field" = "$name" ]; then
             [ "$want" = index ] && printf '%s' "$i" || printf '%s' "$name"
             return 0
@@ -38,7 +40,21 @@ env_lines() {
 
 records() {
     env_lines |
-    awk -F= '
+    awk -F= -v fields="$agent_radar_record_fields" '
+BEGIN {
+    n = split(fields, field_order, " ")
+    for (i = 1; i <= n; i++) match_order[i] = field_order[i]
+    # Match longer suffixes first: _SEEN_STOPPED_AT must not be eaten as _STOPPED_AT.
+    for (i = 1; i <= n; i++) {
+        for (j = i + 1; j <= n; j++) {
+            if (length(match_order[j]) > length(match_order[i])) {
+                tmp = match_order[i]
+                match_order[i] = match_order[j]
+                match_order[j] = tmp
+            }
+        }
+    }
+}
 {
     key = $1
     if (key !~ /^TMUX_AGENT_RADAR_PANE_/) next
@@ -47,17 +63,23 @@ records() {
     pane = key
     sub(/^TMUX_AGENT_RADAR_PANE_/, "", pane)
 
-    if (pane ~ /_SEEN_STOPPED_AT$/) { sub(/_SEEN_STOPPED_AT$/, "", pane); seen_at[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_LAST_CHANGE$/) { sub(/_LAST_CHANGE$/, "", pane); last_change[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_STOPPED_AT$/) { sub(/_STOPPED_AT$/, "", pane); stopped_at[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_AGENT$/) { sub(/_AGENT$/, "", pane); agent[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_TARGET$/) { sub(/_TARGET$/, "", pane); target[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_ARMED$/) { sub(/_ARMED$/, "", pane); armed[pane] = val; panes[pane] = 1; next }
-    if (pane ~ /_STATE$/) { sub(/_STATE$/, "", pane); state[pane] = val; panes[pane] = 1; next }
+    for (i = 1; i <= n; i++) {
+        suffix = "_" match_order[i]
+        if (pane ~ suffix "$") {
+            sub(suffix "$", "", pane)
+            value[pane, match_order[i]] = val
+            panes[pane] = 1
+            next
+        }
+    }
 }
 END {
-    for (pane in panes)
-        print pane "|" agent[pane] "|" target[pane] "|" last_change[pane] "|" armed[pane] "|" state[pane] "|" stopped_at[pane] "|" seen_at[pane]
+    for (pane in panes) {
+        row = pane
+        for (i = 1; i <= n; i++)
+            row = row "|" value[pane, field_order[i]]
+        print row
+    }
 }' |
     sort -t '|' -k1,1
 }
@@ -65,8 +87,8 @@ END {
 current_from_records() {
     pane=$1
     idx=$2
-    awk -F '|' -v pane="$pane" -v idx="$idx" '
-$1 == pane { print $idx; found = 1; exit }
+    awk -F '|' -v pane="$pane" -v idx="$idx" -v col_pane="$agent_radar_record_col_pane" '
+$col_pane == pane { print $idx; found = 1; exit }
 END { exit found ? 0 : 1 }
 ' "$AGENT_RADAR_STORE_RECORDS_FILE"
 }
@@ -126,7 +148,7 @@ clear_pane() {
     [ "$#" -eq 1 ] || usage
     pane=$1
     command -v tmux >/dev/null 2>&1 || exit 0
-    for suffix in $fields; do
+    for suffix in $agent_radar_record_fields; do
         tmux set-environment -gu "$(key "$pane" "$suffix")" 2>/dev/null || true
     done
 }

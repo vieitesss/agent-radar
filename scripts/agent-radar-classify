@@ -2,15 +2,25 @@
 set -eu
 
 now=${1:-$(date +%s)}
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+. "$script_dir/agent-radar-record-columns"
+eval "$(agent_radar_record_column_vars)"
 
-awk -F '|' -v now="$now" '
+awk -F '|' \
+    -v now="$now" \
+    -v col_pane="$agent_radar_record_col_pane" \
+    -v col_agent="$agent_radar_record_col_agent" \
+    -v col_target="$agent_radar_record_col_target" \
+    -v col_state="$agent_radar_record_col_state" \
+    -v col_stopped_at="$agent_radar_record_col_stopped_at" \
+    -v col_seen_at="$agent_radar_record_col_seen_stopped_at" '
 {
-    pane = $1
-    agent = $2
-    target = $3
-    state = $6 == "" ? "working" : $6
-    stopped_at = $7
-    seen_at = $8
+    pane = $col_pane
+    agent = $col_agent
+    target = $col_target
+    state = $col_state == "" ? "working" : $col_state
+    stopped_at = $col_stopped_at
+    seen_at = $col_seen_at
     if (agent == "" || target == "") next
 
     if (state == "stopped") {

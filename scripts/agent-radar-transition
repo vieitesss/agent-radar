@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+set -eu
+
+# Wire format: state|last_change|armed|working|now|idle
+# Emits: state|last_change|armed|stopped_at|notify
+awk -F '|' '
+function number(v) { return v ~ /^[0-9]+$/ }
+{
+    state = $1
+    last = $2
+    armed = $3
+    working = $4
+    now = $5
+    idle = $6
+    stopped_at = ""
+    notify = 0
+
+    if (!number(last)) last = now
+
+    if (working == "1") {
+        state = "working"
+        last = now
+        armed = 1
+    } else if (state == "") {
+        state = "working"
+        last = now
+        armed = 0
+    } else if (state == "stopped") {
+        stopped_at = last
+    } else if (number(now) && number(idle) && now - last >= idle) {
+        state = "stopped"
+        stopped_at = last
+        notify = armed == "1" ? 1 : 0
+    }
+
+    print state "|" last "|" armed "|" stopped_at "|" notify
+}'
