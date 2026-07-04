@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/preview.png" alt="agent-radar example"></p>
+<p align="center"><video src="assets/showcase.mp4" controls muted loop></video></p>
 
 # agent-radar
 
