@@ -18,7 +18,7 @@ harness, not just the ones with hooks.
   `osascript` on macOS, `notify-send` on Linux), backed by a persistent status-left
   segment listing sessions with a stopped agent and a highlighted tmux window
   until you focus the exact agent pane.
-- **Navigates** — `prefix + a` opens an fzf popup listing all agent panes,
+- **Navigates**: `prefix + a` opens an fzf popup listing all agent panes,
   stopped ones first, with a red/yellow/green status dot (unseen-stopped,
   running, seen-stopped) and stopped age. The list refreshes while open. Pick
   one and it jumps to that exact `session:window.pane`.
