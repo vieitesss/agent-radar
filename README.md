@@ -1,6 +1,6 @@
 # agent-radar
 
-A self-contained tmux plugin that gives you the one herdr feature worth having
+A self-contained tmux plugin that gives you the one [herdr](https://github.com/ogulcancelik/herdr) feature worth having
 without leaving tmux: see every running coding agent, jump straight to the pane
 it lives in, and get told the moment any agent stops needing you — for *any*
 harness, not just the ones with hooks.
