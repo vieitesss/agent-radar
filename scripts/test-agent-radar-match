@@ -6,7 +6,7 @@ matcher=$script_dir/agent-radar-match
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-match-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM HUP
 
-pattern=$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt')
+pattern=$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt|(\302\267|\342\234\242|\342\234\263|\342\234\266|\342\234\273|\342\234\275) [[:alpha:]]+\342\200\246 \\(')
 
 printf 'thinking \342\240\201\n' > "$tmp/braille"
 printf '\342\254\235\342\226\240\342\226\240\342\254\235\n' > "$tmp/opencode"
@@ -39,6 +39,12 @@ assert_exit box-drawing 1 "$pattern"
 assert_exit quoted-working 1 "$pattern"
 assert_exit hermes-running 0 "$pattern"
 assert_exit hermes-idle 1 "$pattern"
+for glyph in '·' '✢' '✳' '✶' '✻' '✽'; do
+    printf '%s Thinking… (12s · ↓ 300 tokens · esc to interrupt)\n' "$glyph" > "$tmp/claude-working"
+    assert_exit claude-working 0 "$pattern"
+    printf '%s Worked for 1m 12s\n' "$glyph" > "$tmp/claude-idle"
+    assert_exit claude-idle 1 "$pattern"
+done
 assert_exit custom 0 'custom marker'
 
 printf 'agent-radar-match ok\n'

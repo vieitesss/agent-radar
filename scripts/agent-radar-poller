@@ -154,11 +154,10 @@ poll_once() {
     valid_number "$idle" || idle=3
     allow=,$(opt @agent-radar-processes 'pi,claude,codex,opencode,hermes,aider,cursor'),
     # Working-indicator pattern (ERE, matched byte-wise under LC_ALL=C). Default
-    # matches the braille progress glyph (E2 A0-A3 xx = U+2800-U+28FF) that pi/
-    # claude/codex animate, OR opencode's 4+-long square progress bar (U+25A0/
-    # U+2B1D), OR hermes' prompt-line running hint (msg=interrupt, shown only
-    # while a turn is in flight); none appear in quoted transcript text.
-    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt')")
+    # matches pi/codex's braille glyph, Claude Code's live status line (spinner
+    # + word + ellipsis + opening parenthesis, unlike its completed-turn
+    # summary), opencode's 4+-square bar, or hermes' running hint.
+    work_re=$(opt @agent-radar-working-pattern "$(printf '\342[\240-\243]|(\342\226\240|\342\254\235){4,}|msg=interrupt|(\302\267|\342\234\242|\342\234\263|\342\234\266|\342\234\273|\342\234\275) [[:alpha:]]+\342\200\246 \\(')")
     present_panes=$(mktemp "${TMPDIR:-/tmp}/agent-radar.XXXXXX") || exit 1
     records_file=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
     "$store_cmd" records > "$records_file"

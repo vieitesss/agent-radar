@@ -16,6 +16,15 @@ TMUX_AGENT_RADAR_PANE_%1_LAST_CHANGE=100
 TMUX_AGENT_RADAR_PANE_%1_ARMED=1
 TMUX_AGENT_RADAR_PANE_%1_STATE=stopped
 TMUX_AGENT_RADAR_PANE_%1_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%3_TARGET=test:1.2
+TMUX_AGENT_RADAR_PANE_%3_LAST_CHANGE=100
+TMUX_AGENT_RADAR_PANE_%3_ARMED=1
+TMUX_AGENT_RADAR_PANE_%3_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%3_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%4_TARGET=test:1.3
+TMUX_AGENT_RADAR_PANE_%4_LAST_CHANGE=100
+TMUX_AGENT_RADAR_PANE_%4_ARMED=1
+TMUX_AGENT_RADAR_PANE_%4_STATE=working
 EOF
 
 mkdir "$tmp/bin"
@@ -23,12 +32,14 @@ cat > "$tmp/bin/tmux" <<'EOF'
 #!/usr/bin/env sh
 case "$1" in
     show-option) exit 0 ;;
-    list-panes) printf '%%1|test:1.0|/dev/ttys001\n%%2|test:1.1|/dev/ttys002\n' ;;
+    list-panes) printf '%%1|test:1.0|/dev/ttys001\n%%2|test:1.1|/dev/ttys002\n%%3|test:1.2|/dev/ttys003\n%%4|test:1.3|/dev/ttys004\n' ;;
     capture-pane)
         [ "$1 $2 $3" = 'capture-pane -pJ -t' ] || { echo "unexpected capture-pane args: $*" >&2; exit 1; }
         case "$4" in
             %1) printf '⬝■■■■■■⬝  esc interrupt\n' ;;
             %2) printf '⚕ ❯ msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel\n' ;;
+            %3) printf '✻ Thinking… (12s · ↓ 300 tokens · esc to interrupt)\n' ;;
+            %4) printf '✻ Worked for 1m 12s\n' ;;
             *) echo "unexpected capture-pane target: $*" >&2; exit 1 ;;
         esac
         ;;
@@ -48,6 +59,8 @@ case "$1 $2 $3 $4 $5 $6" in
     '-t ttys001 -o comm= -o args=') printf '%s\n' 'opencode /usr/local/bin/opencode' ;;
     # macOS truncates comm to 12 chars in column output; args= stays complete.
     '-t ttys002 -o comm= -o args=') printf '%s\n' '-zsh -zsh' '/Users/vieitespr /Users/vieitesprefapp/.hermes/hermes-agent/venv/bin/python /Users/vieitesprefapp/.hermes/hermes-agent/hermes' ;;
+    '-t ttys003 -o comm= -o args=') printf '%s\n' 'claude /home/user/.local/bin/claude' ;;
+    '-t ttys004 -o comm= -o args=') printf '%s\n' 'claude /home/user/.local/bin/claude' ;;
     *) echo "unexpected ps $*" >&2; exit 1 ;;
 esac
 EOF
@@ -69,6 +82,20 @@ grep -Fx 'set TMUX_AGENT_RADAR_PANE_%2_AGENT=hermes' "$log" >/dev/null || {
 }
 grep -Fx 'set TMUX_AGENT_RADAR_PANE_%2_STATE=working' "$log" >/dev/null || {
     echo 'hermes prompt-line hint was classified stopped' >&2
+    exit 1
+}
+
+# --- Claude Code: the live status line is working; a completed-turn summary is not.
+grep -Fx 'set TMUX_AGENT_RADAR_PANE_%3_AGENT=claude' "$log" >/dev/null || {
+    echo 'claude pane was not detected' >&2
+    exit 1
+}
+grep -Fx 'set TMUX_AGENT_RADAR_PANE_%3_STATE=working' "$log" >/dev/null || {
+    echo 'Claude Code live status line was classified stopped' >&2
+    exit 1
+}
+grep -Fx 'set TMUX_AGENT_RADAR_PANE_%4_STATE=stopped' "$log" >/dev/null || {
+    echo 'Claude Code completed-turn summary was classified working' >&2
     exit 1
 }
 
