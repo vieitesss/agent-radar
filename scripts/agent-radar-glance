@@ -20,16 +20,13 @@ case "$glance_row" in
     ''|*[!0-9]*) glance_row=2 ;;
 esac
 glance_idx=$((glance_row - 1))
-stock_text='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
+# shellcheck disable=SC2034 # read by agent-radar-glance-row
 glance_format="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')"
+. "$script_dir/agent-radar-glance-row"
 
 # A cached #() can outlive a row change; stop if the configured row is custom.
 slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
-free=0
-case "$slot" in
-    ''|"$stock_text"|"$glance_format") free=1 ;;
-esac
-if [ "$free" -eq 0 ]; then
+if ! agent_radar_glance_row_free "$glance_idx" "$slot"; then
     err_sent=$(tmux show-option -gqv @agent-radar-glance-occupied-error 2>/dev/null || true)
     if [ -z "$err_sent" ]; then
         tmux display-message "agent-radar: status line $glance_row is in use; set -g @agent-radar-glance-row M"

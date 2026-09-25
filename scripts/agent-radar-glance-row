@@ -1,0 +1,38 @@
+# shellcheck shell=sh disable=SC2154 # glance_format comes from the caller
+# Shared ownership rules for the glance row's status-format slot.
+# Callers set glance_format to their exact glance row format before calling these.
+
+# tmux's built-in status-format[1]: the pane-size list before 3.7, the pane list from 3.7.
+agent_radar_glance_row_stock_pre37='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
+agent_radar_glance_row_stock_37='#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }'
+
+# Print this tmux's built-in status-format[$1], read from a throwaway server with no config.
+agent_radar_glance_row_default() {
+    _ar_probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-probe.XXXXXX") || return 0
+    tmux -f /dev/null -S "$_ar_probe_dir/s" start-server \; show-option -gqv "status-format[$1]" \; kill-server 2>/dev/null || true
+    rm -rf "$_ar_probe_dir"
+}
+
+# Succeed when status-format[$1], holding $2, is empty, the glance, or tmux's built-in text.
+agent_radar_glance_row_free() {
+    case "$2" in
+        ''|"$glance_format"|"$agent_radar_glance_row_stock_pre37"|"$agent_radar_glance_row_stock_37") return 0 ;;
+    esac
+    [ "$2" = "$(agent_radar_glance_row_default "$1")" ]
+}
+
+# Write the glance into status-format[$1], remembering its previous text $2 for release.
+agent_radar_glance_row_claim() {
+    if [ "$2" != "$glance_format" ]; then
+        tmux set-option -gq @agent-radar-glance-orig-format "$2"
+    fi
+    tmux set-option -g "status-format[$1]" "$glance_format"
+}
+
+# Give status-format[$1] back its pre-claim text, or tmux's built-in text if none was kept.
+agent_radar_glance_row_release() {
+    _ar_text=$(tmux show-option -gqv @agent-radar-glance-orig-format 2>/dev/null || true)
+    [ -n "$_ar_text" ] || _ar_text=$(agent_radar_glance_row_default "$1")
+    tmux set-option -g "status-format[$1]" "$_ar_text"
+    tmux set-option -gu @agent-radar-glance-orig-format 2>/dev/null || true
+}

@@ -17,6 +17,11 @@ cat > "$tmp/bin/tmux" <<'EOF'
 #!/usr/bin/env sh
 stock_slot='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
 case "$1" in
+    -f)
+        # Default probe on a throwaway server: tmux -f /dev/null -S sock start-server ...
+        printf 'probe %s\n' "$*" >> "$TMUX_LOG"
+        printf '%s\n' "${TEST_DEFAULT-$stock_slot}"
+        ;;
     show-hooks)
         cat "$TMUX_HOOKS"
         ;;
@@ -24,6 +29,7 @@ case "$1" in
         case "$3" in
             @agent-radar-glance) printf '%s\n' "${TEST_GLANCE:-on}" ;;
             @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
+            @agent-radar-glance-orig-format) printf '%s\n' "${TEST_ORIG_FORMAT:-}" ;;
             status-left) printf 'left ' ;;
             status-format\[1\])
                 if [ "${TEST_SLOT+x}" = x ]; then printf '%s\n' "$TEST_SLOT"
@@ -148,6 +154,54 @@ grep -F 'set-option -g status on' "$log" >/dev/null || {
 grep -F 'set-option -gu @agent-radar-glance-state' "$log" >/dev/null || {
     echo 'reload with glance off did not unset @agent-radar-glance-state' >&2
     exit 1
+}
+
+# --- tmux 3.7 default on row 2 is free, and is kept for teardown ---
+stock_37='#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }'
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_SLOT="$stock_37" "$repo_dir/agent-radar.tmux"
+grep -F "set-option -g status-format[1] #('$repo_dir/scripts/agent-radar-glance'" "$log" >/dev/null || {
+    echo 'glance did not claim a row holding the tmux 3.7 default' >&2; exit 1
+}
+grep -F "set-option -gq @agent-radar-glance-orig-format $stock_37" "$log" >/dev/null || {
+    echo 'claim did not keep the row text it replaced' >&2; exit 1
+}
+if grep -F 'probe ' "$log" >/dev/null; then
+    echo 'a known default started a probe server' >&2; exit 1
+fi
+
+# --- An unknown default is free when this tmux reports it as built in ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_SLOT='future default' TEST_DEFAULT='future default' \
+    "$repo_dir/agent-radar.tmux"
+grep -F 'probe -f /dev/null -S ' "$log" | grep -F 'show-option -gqv status-format[1]' >/dev/null || {
+    echo 'unknown row text did not ask a clean tmux for its default' >&2; exit 1
+}
+grep -F "set-option -g status-format[1] #('$repo_dir/scripts/agent-radar-glance'" "$log" >/dev/null || {
+    echo 'glance did not claim a row holding this tmux default' >&2; exit 1
+}
+
+# --- Teardown puts back the kept text ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_GLANCE=off TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_ORIG_FORMAT="$stock_37" \
+    TEST_SLOT="#('$repo_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$repo_dir/agent-radar.tmux"
+grep -F "set-option -g status-format[1] $stock_37" "$log" >/dev/null || {
+    echo 'teardown did not restore the kept row text' >&2; exit 1
+}
+grep -F 'set-option -gu @agent-radar-glance-orig-format' "$log" >/dev/null || {
+    echo 'teardown did not drop the kept row text' >&2; exit 1
+}
+
+# --- Teardown with nothing kept falls back to this tmux default ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_GLANCE=off TEST_STATUS=2 TEST_ORIG_STATUS=on \
+    TEST_DEFAULT='future default' \
+    TEST_SLOT="#('$repo_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$repo_dir/agent-radar.tmux"
+grep -F 'set-option -g status-format[1] future default' "$log" >/dev/null || {
+    echo 'teardown without kept text did not restore this tmux default' >&2; exit 1
 }
 
 printf 'agent-radar-plugin ok\n'

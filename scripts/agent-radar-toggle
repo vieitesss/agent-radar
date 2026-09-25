@@ -18,8 +18,8 @@ case "$glance_row" in
 esac
 glance_idx=$((glance_row - 1))
 
-stock_text='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
 glance_format="#('$glance_cmd' '#{session_name}' '#{window_width}')"
+. "$script_dir/agent-radar-glance-row"
 
 state=$(opt @agent-radar-glance-state off)
 
@@ -28,7 +28,7 @@ case "$state" in
         slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
         case "$slot" in
             "$glance_format")
-                tmux set-option -g "status-format[$glance_idx]" "$stock_text"
+                agent_radar_glance_row_release "$glance_idx"
                 ;;
         esac
 
@@ -50,16 +50,12 @@ case "$state" in
 
     off)
         slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
-        free=0
-        case "$slot" in
-            ''|"$stock_text"|"$glance_format") free=1 ;;
-        esac
-        if [ "$free" -eq 0 ]; then
+        if ! agent_radar_glance_row_free "$glance_idx" "$slot"; then
             tmux display-message "agent-radar: status line $glance_row is in use; set -g @agent-radar-glance-row M"
             exit 0
         fi
 
-        tmux set-option -g "status-format[$glance_idx]" "$glance_format"
+        agent_radar_glance_row_claim "$glance_idx" "$slot"
 
         current_status=$(tmux show-option -gqv status 2>/dev/null || true)
         tmux set-option -gq @agent-radar-glance-orig-status "$current_status"

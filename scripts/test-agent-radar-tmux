@@ -4,6 +4,7 @@ set -eu
 repo_dir=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P) || exit 1
 real_tmux=$(command -v tmux) || { echo 'tmux is required' >&2; exit 1; }
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-tmux-test.XXXXXX") || exit 1
+tmp=$(CDPATH='' cd "$tmp" && pwd -P) || exit 1
 socket="agent-radar-test-${tmp##*.}"
 trap 'tmux kill-server >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT INT TERM HUP
 mkdir "$tmp/bin" "$tmp/plugin with spaces"
@@ -66,6 +67,13 @@ sh "$toggle"
 }
 sh "$toggle"
 [ "$(tmux show-option -gqv status)" = 2 ] || { echo 'on did not restore row 2' >&2; exit 1; }
+# A row claimed before its text was kept gets this tmux's own default back.
+tmux set-option -gu @agent-radar-glance-orig-format
+sh "$toggle"
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$stock" ] || {
+    echo 'off without kept text did not restore the tmux default' >&2; exit 1
+}
+sh "$toggle"
 
 pane=$(tmux display-message -p -t smoke:0.0 '#{pane_id}')
 cat > "$tmp/records" <<EOF

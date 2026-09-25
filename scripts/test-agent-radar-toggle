@@ -13,12 +13,18 @@ log=$tmp/tmux.log
 mkdir "$tmp/bin"
 cat > "$tmp/bin/tmux" <<'EOF'
 #!/usr/bin/env sh
+stock_slot='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
 case "$1" in
+    -f)
+        # Default probe on a throwaway server.
+        printf '%s\n' "${TEST_DEFAULT-$stock_slot}"
+        ;;
     show-option)
         case "$3" in
             @agent-radar-glance-state) printf '%s\n' "${TEST_STATE:-off}" ;;
             @agent-radar-glance-row) printf '%s\n' "${TEST_ROW:-2}" ;;
             @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
+            @agent-radar-glance-orig-format) printf '%s\n' "${TEST_ORIG_FORMAT:-}" ;;
             status-format\[1\]|status-format\[2\]) printf '%s\n' "${TEST_SLOT:-}" ;;
             status) printf '%s\n' "${TEST_STATUS:-on}" ;;
             *) exit 0 ;;
@@ -119,6 +125,25 @@ PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_ROW=3 TEST_STATUS=3 TEST_OR
     "$toggle"
 grep -F 'set-option -g status 2' "$log" >/dev/null || {
     echo 'toggle off did not restore the original status count of 2' >&2; exit 1
+}
+
+# --- off -> on over the tmux 3.7 default, then on -> off puts it back ---
+stock_37='#[align=left]#{R: ,#{n:#{session_name}}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]  ,#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default] }'
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_SLOT="$stock_37" "$toggle"
+grep -F "set-option -g status-format[1] #('$script_dir/agent-radar-glance'" "$log" >/dev/null || {
+    echo 'toggle on did not claim a row holding the tmux 3.7 default' >&2; exit 1
+}
+grep -F "set-option -gq @agent-radar-glance-orig-format $stock_37" "$log" >/dev/null || {
+    echo 'toggle on did not keep the row text it replaced' >&2; exit 1
+}
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
+    TEST_ORIG_FORMAT="$stock_37" \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+grep -F "set-option -g status-format[1] $stock_37" "$log" >/dev/null || {
+    echo 'toggle off did not restore the kept row text' >&2; exit 1
 }
 
 printf 'agent-radar-toggle ok\n'

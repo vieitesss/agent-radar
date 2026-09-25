@@ -37,17 +37,13 @@ case "$glance_row" in
     ''|*[!0-9]*) glance_row=2 ;;
 esac
 glance_idx=$((glance_row - 1))
-stock_text='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
 glance_format="#('$current_dir/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+. "$current_dir/scripts/agent-radar-glance-row"
 
 if [ "$glance" = on ]; then
     current_slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
-    free=0
-    case "$current_slot" in
-        ''|"$stock_text"|"$glance_format") free=1 ;;
-    esac
-    if [ "$free" -eq 1 ]; then
-        tmux set-option -g "status-format[$glance_idx]" "$glance_format"
+    if agent_radar_glance_row_free "$glance_idx" "$current_slot"; then
+        agent_radar_glance_row_claim "$glance_idx" "$current_slot"
 
         current_status=$(tmux show-option -gqv status 2>/dev/null || true)
         orig_status=$(tmux show-option -gqv @agent-radar-glance-orig-status 2>/dev/null || true)
@@ -74,7 +70,7 @@ else
     current_slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
     case "$current_slot" in
         "$glance_format")
-            tmux set-option -g "status-format[$glance_idx]" "$stock_text"
+            agent_radar_glance_row_release "$glance_idx"
 
             current_status=$(tmux show-option -gqv status 2>/dev/null || true)
             orig_status=$(tmux show-option -gqv @agent-radar-glance-orig-status 2>/dev/null || true)
