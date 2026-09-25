@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="agent-radar logo">
+  <defs>
+    <radialGradient id="face" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#27293d"/>
+      <stop offset="100%" stop-color="#1a1b2b"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="64" y1="64" x2="116" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#89b4fa" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#89b4fa" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#face)" stroke="#45475a" stroke-width="3"/>
+  <g fill="none" stroke="#45475a" stroke-width="2">
+    <circle cx="64" cy="64" r="42"/>
+    <circle cx="64" cy="64" r="22"/>
+    <path d="M64 6v116M6 64h116" stroke-opacity="0.6"/>
+  </g>
+  <!-- sweep: a wedge trailing the beam, which points up-right -->
+  <path d="M64 64 L118 42 A58 58 0 0 0 86 10 Z" fill="url(#sweep)"/>
+  <path d="M64 64 L118 42" stroke="#89b4fa" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="5" fill="#89b4fa"/>
+  <!-- three agents: unseen-stopped, working, seen-stopped -->
+  <circle cx="94" cy="30" r="7" fill="#f38ba8"/>
+  <circle cx="36" cy="46" r="6" fill="#f9e2af"/>
+  <circle cx="80" cy="96" r="6" fill="#a6e3a1"/>
+</svg>
