@@ -43,3 +43,14 @@ you. Being elsewhere in its session (a different pane) does not clear it.
 A stopped agent whose exact pane you focused after it stopped, marking it
 handled. The bottom tier in the navigator (green dot).
 _Avoid_: dismissed, acknowledged
+
+**Glance row**:
+An always-visible tmux status row that lists every agent pane with its status
+dot (red unseen-stopped, yellow working, green seen-stopped). The passive way to
+watch agents.
+_Avoid_: status line, second row, radar bar
+
+**Navigator**:
+The on-demand list of every agent pane, unseen-stopped first, that jumps to the
+chosen target. The active way to reach an agent.
+_Avoid_: popup, picker, switcher
