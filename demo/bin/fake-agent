@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Stand-in coding agent for the demo recording.
+
+Invoked through a symlink named after a harness (claude, pi, codex), so
+agent-radar's allowlist matches it via `python3 /path/<harness>`. It animates a
+braille working indicator until the driver bumps its control file, then prints
+a reply and waits at a prompt. Typing a line starts the next task.
+
+usage: <harness> <ctl-file> <task-json>
+"""
+import json
+import os
+import sys
+import time
+
+harness = os.path.basename(sys.argv[0])
+ctl, tasks = sys.argv[1], json.load(open(sys.argv[2]))
+
+SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+DIM, BOLD, RESET = "\033[2m", "\033[1m", "\033[0m"
+ACCENT = {"claude": "\033[38;5;173m", "pi": "\033[38;5;111m", "codex": "\033[38;5;114m"}.get(harness, "\033[36m")
+
+
+def out(s):
+    sys.stdout.write(s)
+    sys.stdout.flush()
+
+
+def released(n):
+    try:
+        return int(open(ctl).read().strip() or 0) >= n
+    except (OSError, ValueError):
+        return False
+
+
+def run(i, task, echo=True):
+    if echo:
+        out(f"\n {BOLD}>{RESET} {task['prompt']}\n")
+    out("\n")
+    steps, start, shown = task["steps"], time.time(), 0
+    frame = 0
+    while not released(i + 1):
+        elapsed = time.time() - start
+        # Reveal a tool step every ~2.5s so the pane looks alive.
+        while shown < len(steps) and elapsed >= 1.2 + shown * 2.5:
+            out(f"\r\033[K   {DIM}{steps[shown]}{RESET}\n")
+            shown += 1
+        out(f"\r\033[K {ACCENT}{SPIN[frame % len(SPIN)]}{RESET} Working… {DIM}{int(elapsed)}s · esc to interrupt{RESET}")
+        frame += 1
+        time.sleep(0.1)
+    for s in steps[shown:]:
+        out(f"\r\033[K   {DIM}{s}{RESET}\n")
+    out(f"\r\033[K\n {ACCENT}●{RESET} {task['reply']}\n")
+
+
+out("\033[2J\033[H")
+out(f" {ACCENT}{BOLD}{harness}{RESET} {DIM}· {os.getcwd().replace(os.path.expanduser('~'), '~')}{RESET}\n")
+for i, task in enumerate(tasks):
+    if i > 0:
+        try:
+            out("\n")
+            input(f" {BOLD}>{RESET} ")
+        except EOFError:
+            break
+    run(i, task, echo=i == 0)
+out("\n")
+while True:
+    try:
+        input(f" {BOLD}>{RESET} ")
+    except EOFError:
+        break
