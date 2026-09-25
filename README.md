@@ -78,3 +78,10 @@ Set with `tmux set-option -g <name> <value>` (or `set -g` in `~/.tmux.conf`):
 | `@agent-radar-popup-height` | `30%` | Popup height |
 | `@agent-radar-popup-position` | `C` | Popup position: `C`, `x,y`, or corner shorthand (`tl`/`tr`/`bl`/`br`) |
 | `@agent-radar-window-color` | `red` | Background color for windows containing unseen stopped agents |
+
+## Releasing
+
+To release, create and push an annotated `vX.Y.Z` tag on `main` with a message
+like `Release vX.Y.Z: <summary>`. The tag push runs the test suite and, if it
+passes, publishes a GitHub release with notes generated from conventional
+commits since the previous tag.
