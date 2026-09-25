@@ -1,0 +1,145 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "usage: $0 <previous-tag|''> <tag> [repository-owner]" >&2
+    exit 2
+fi
+
+previous_tag=$1
+tag=$2
+owner=${3:-}
+git rev-parse --verify "$tag^{commit}" >/dev/null
+if [ -n "$previous_tag" ]; then
+    git rev-parse --verify "$previous_tag^{commit}" >/dev/null
+    range=$previous_tag..$tag
+else
+    range=$tag
+fi
+
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-release-notes.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+: > "$tmp/breaking"
+: > "$tmp/feat"
+: > "$tmp/fix"
+: > "$tmp/docs"
+
+commits=$(git rev-list --reverse --no-merges "$range")
+for commit in $commits; do
+    subject=$(git show -s --format=%s "$commit")
+    breaking_footer=no
+    if git show -s --format=%B "$commit" | grep -q '^BREAKING CHANGE:'; then
+        breaking_footer=yes
+    fi
+
+    formatted=$(printf '%s\n' "$subject" | awk '
+        {
+            colon = index($0, ":")
+            if (!colon) exit
+            header = substr($0, 1, colon - 1)
+            description = substr($0, colon + 1)
+            sub(/^[[:space:]]+/, "", description)
+            breaking = 0
+            if (header ~ /!$/) {
+                breaking = 1
+                sub(/!$/, "", header)
+            }
+            type = header
+            scope = ""
+            if (header ~ /\)$/) {
+                open = index(header, "(")
+                if (open) {
+                    type = substr(header, 1, open - 1)
+                    scope = substr(header, open + 1, length(header) - open - 1)
+                }
+            }
+            if (type !~ /^[[:alnum:]][[:alnum:]._-]*$/) exit
+            if (breaking) category = "breaking"
+            else category = type
+            if (scope != "") bullet = "- **" scope "**: " description
+            else bullet = "- " description
+            printf "%s\n%s", category, bullet
+        }
+    ')
+
+    if [ -z "$formatted" ]; then
+        [ "$breaking_footer" = yes ] || continue
+        category=breaking
+        bullet="- $subject"
+    else
+        newline='
+'
+        category=${formatted%%"$newline"*}
+        bullet=${formatted#*"$newline"}
+        [ "$breaking_footer" = yes ] && category=breaking
+    fi
+
+    case $category in
+        breaking|feat|fix|docs) printf '%s\n' "$bullet" >> "$tmp/$category" ;;
+    esac
+done
+
+printed=no
+write_section() {
+    title=$1
+    file=$2
+    if [ -s "$file" ]; then
+        if [ "$printed" = yes ]; then printf '\n'; fi
+        printf '## %s\n\n' "$title"
+        cat "$file"
+        printed=yes
+    fi
+}
+write_section 'Breaking changes' "$tmp/breaking"
+write_section "What's new" "$tmp/feat"
+write_section Fixes "$tmp/fix"
+write_section Docs "$tmp/docs"
+
+thanks=$(git log --merges --format=%s --reverse "$range" | RELEASE_OWNER=$owner awk '
+    BEGIN {
+        owner = tolower(ENVIRON["RELEASE_OWNER"])
+    }
+    /^Merge pull request #[0-9]+ from [^/]+\// {
+        line = $0
+        pr = line
+        sub(/^Merge pull request #/, "", pr)
+        sub(/ from .*/, "", pr)
+        user = line
+        sub(/^Merge pull request #[0-9]+ from /, "", user)
+        sub(/\/.*/, "", user)
+        if (tolower(user) == owner) next
+        key = tolower(user)
+        if (!(key in user_index)) {
+            user_index[key] = ++user_count
+            users[user_count] = user
+        }
+        index_for_user = user_index[key]
+        if (!seen_pr[index_for_user, pr]) {
+            seen_pr[index_for_user, pr] = 1
+            prs[index_for_user, ++pr_count[index_for_user]] = pr
+        }
+    }
+    END {
+        if (!user_count) exit
+        printf "Thanks to "
+        for (i = 1; i <= user_count; i++) {
+            if (i > 1) {
+                if (i == user_count) printf " and "
+                else printf ", "
+            }
+            printf "@%s for ", users[i]
+            for (j = 1; j <= pr_count[i]; j++) {
+                if (j > 1) {
+                    if (j == pr_count[i]) printf " and "
+                    else printf ", "
+                }
+                printf "#%s", prs[i, j]
+            }
+        }
+        printf ".\n"
+    }
+')
+if [ -n "$thanks" ]; then
+    if [ "$printed" = yes ]; then printf '\n'; fi
+    printf '%s\n' "$thanks"
+fi

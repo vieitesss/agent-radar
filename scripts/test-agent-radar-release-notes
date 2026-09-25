@@ -1,0 +1,99 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || exit 1
+notes=$script_dir/agent-radar-release-notes
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-release-notes-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+repo=$tmp/repo
+mkdir "$repo"
+git -C "$repo" init -q -b main
+git -C "$repo" config user.name 'Release Test'
+git -C "$repo" config user.email 'release-test@example.com'
+
+commit() {
+    git -C "$repo" commit -q --allow-empty "$@"
+}
+
+commit -m 'feat(core): bootstrap project'
+git -C "$repo" tag -a v0.1.0 -m 'Release v0.1.0'
+
+# An empty previous tag means all history reachable from the requested tag.
+(cd "$repo" && "$notes" '' v0.1.0 example-owner) > "$tmp/first-tag"
+cat > "$tmp/expected-first-tag" <<'EOF'
+## What's new
+
+- **core**: bootstrap project
+EOF
+diff -u "$tmp/expected-first-tag" "$tmp/first-tag"
+
+commit -m 'feat(api): add endpoint'
+commit -m 'feat(ui)!: replace the interface'
+commit -m 'fix(api): correct status'
+commit -m 'refactor(config): rename option' -m 'BREAKING CHANGE: old option names are no longer supported.'
+commit -m 'docs: explain releases'
+commit -m 'test: add release fixture coverage'
+commit -m 'chore: ignore this commit'
+
+# Even a merge commit with a conventional-looking subject is excluded.
+git -C "$repo" checkout -q -b ignored-merge
+commit -m 'chore: prepare merge fixture'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q ignored-merge -m 'feat(merge): must not be a release bullet'
+
+# Include real merge commits for outside contributors, and an owner PR to omit.
+git -C "$repo" checkout -q -b alice-first
+commit -m 'feat(contrib): add first option'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q alice-first -m 'Merge pull request #2 from Alice/first'
+
+git -C "$repo" checkout -q -b alice-second
+commit -m 'fix(contrib): improve option'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q alice-second -m 'Merge pull request #3 from Alice/second'
+
+git -C "$repo" checkout -q -b owner-change
+commit -m 'chore: maintainer-only cleanup'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q owner-change -m 'Merge pull request #4 from Example-Owner/cleanup'
+
+git -C "$repo" checkout -q -b bob-change
+commit -m 'chore: Bob contributor fixture'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q bob-change -m 'Merge pull request #5 from Bob/feature'
+
+git -C "$repo" checkout -q -b carol-change
+commit -m 'chore: Carol contributor fixture'
+git -C "$repo" checkout -q main
+git -C "$repo" merge --no-ff -q carol-change -m 'Merge pull request #6 from Carol/feature'
+
+# A non-merge commit that looks like a PR merge must not earn contributor credit.
+commit -m 'Merge pull request #99 from Mallory/not-a-merge'
+git -C "$repo" tag -a v1.0.0 -m 'Release v1.0.0'
+
+(cd "$repo" && "$notes" v0.1.0 v1.0.0 example-owner) > "$tmp/expected-actual"
+cat > "$tmp/expected-notes" <<'EOF'
+## Breaking changes
+
+- **ui**: replace the interface
+- **config**: rename option
+
+## What's new
+
+- **api**: add endpoint
+- **contrib**: add first option
+
+## Fixes
+
+- **api**: correct status
+- **contrib**: improve option
+
+## Docs
+
+- explain releases
+
+Thanks to @Alice for #2 and #3, @Bob for #5 and @Carol for #6.
+EOF
+diff -u "$tmp/expected-notes" "$tmp/expected-actual"
+
+printf 'agent-radar-release-notes ok\n'
