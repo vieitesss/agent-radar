@@ -1,0 +1,31 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Run test scripts
+        shell: sh
+        run: |
+          set -eu
+          for test_script in scripts/test-*; do
+            [ -f "$test_script" ] || continue
+            printf 'Running %s\n' "$test_script"
+            if ! sh "$test_script"; then
+              printf 'FAILED: %s\n' "$test_script" >&2
+              exit 1
+            fi
+          done
