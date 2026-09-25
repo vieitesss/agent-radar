@@ -223,7 +223,7 @@ loads.
 ## Contributing
 
 Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
-covers running the tests and making a release.
+covers running the tests and the commit style.
 
 ## License
 

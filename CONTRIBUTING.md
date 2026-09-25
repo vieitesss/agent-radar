@@ -21,9 +21,3 @@ CI runs the same scripts on every push and pull request.
 Use [conventional commits](https://www.conventionalcommits.org/) (`feat:`,
 `fix:`, `docs:`, …). The release notes are generated from them.
 
-## Releasing
-
-To release, create and push an annotated `vX.Y.Z` tag on `main` with a message
-like `Release vX.Y.Z: <summary>`. The tag push runs the test suite and, if it
-passes, publishes a GitHub release with notes generated from conventional
-commits since the previous tag.
