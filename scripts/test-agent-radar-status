@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
 set -eu
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
@@ -57,26 +58,12 @@ EOF
 chmod +x "$tmp/bin/tmux"
 
 PATH=$tmp/bin:$PATH AGENT_RADAR_STORE_FILE=$fixture TMUX_LOG=$log "$status" work > "$tmp/out"
-printf '#[fg=yellow][agents - work]#[default]' > "$tmp/expected-out"
-diff -u "$tmp/expected-out" "$tmp/out"
+[ -z "$(cat "$tmp/out")" ] || { echo 'agent-radar-status produced stdout output' >&2; cat "$tmp/out"; exit 1; }
 
 grep -Fx "run-shell -b '$script_dir/agent-radar-poller' start" "$log" >/dev/null || {
     echo 'poller heartbeat was not invoked' >&2
     exit 1
 }
-
-grep -Fx 'set-window-option -t work:2 -q @agent-radar-window-stopped 1' "$log" >/dev/null || {
-    echo 'unseen stopped window was not highlighted' >&2
-    exit 1
-}
-if grep -F 'set-window-option -t work:3 -q @agent-radar-window-stopped 1' "$log" >/dev/null; then
-    echo 'seen stopped window was highlighted' >&2
-    exit 1
-fi
-if grep -F 'set-window-option -t other:1 -q @agent-radar-window-stopped 1' "$log" >/dev/null; then
-    echo 'running window was highlighted' >&2
-    exit 1
-fi
 
 # --- heartbeat: skipped (no fork) when a live pid already owns the poller ---
 test_pid=$$

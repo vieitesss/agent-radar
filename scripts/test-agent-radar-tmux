@@ -1,0 +1,103 @@
+#!/usr/bin/env sh
+set -eu
+
+repo_dir=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P) || exit 1
+real_tmux=$(command -v tmux) || { echo 'tmux is required' >&2; exit 1; }
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-tmux-test.XXXXXX") || exit 1
+socket="agent-radar-test-${tmp##*.}"
+trap 'tmux kill-server >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT INT TERM HUP
+mkdir "$tmp/bin" "$tmp/plugin with spaces"
+cp "$repo_dir/agent-radar.tmux" "$tmp/plugin with spaces/agent-radar.tmux"
+cp -R "$repo_dir/scripts" "$tmp/plugin with spaces/scripts"
+cat > "$tmp/bin/tmux" <<EOF
+#!/usr/bin/env sh
+exec "$real_tmux" -L "$socket" "\$@"
+EOF
+chmod +x "$tmp/bin/tmux"
+PATH=$tmp/bin:$PATH; export PATH
+TMUX_TMPDIR=$tmp; export TMUX_TMPDIR
+unset TMUX
+
+plugin="$tmp/plugin with spaces/agent-radar.tmux"
+toggle="$tmp/plugin with spaces/scripts/agent-radar-toggle"
+glance="$tmp/plugin with spaces/scripts/agent-radar-glance"
+tmux -f /dev/null new-session -d -s smoke
+# Keep the isolated poller start guard satisfied without starting a daemon.
+tmux set-option -gq @agent-radar-pid "$$"
+tmux set-hook -g session-window-changed 'display-message "user hook survives"'
+stock=$(tmux show-option -gqv 'status-format[1]')
+
+for custom in 'custom #{pane_index}' 'custom #{pane_width}x#{pane_height}'; do
+    tmux set-option -g 'status-format[1]' "$custom"
+    sh "$plugin"
+    [ "$(tmux show-option -gqv 'status-format[1]')" = "$custom" ] || {
+        echo 'custom row was overwritten' >&2; exit 1
+    }
+    [ "$(tmux show-option -gqv status)" = on ] || {
+        echo 'occupied row increased the status count' >&2; exit 1
+    }
+done
+
+hook=$(tmux show-hooks -g session-window-changed)
+case "$hook" in *'display-message "user hook survives"'*) : ;; *)
+    echo 'plugin replaced the pre-existing session-window-changed hook' >&2; exit 1
+esac
+agent_hook_count=$(printf '%s\n' "$hook" | awk '/agent-radar-status/ { count++ } END { print count + 0 }')
+[ "$agent_hook_count" -eq 1 ] || { echo 'loading twice left a duplicate agent-radar hook' >&2; exit 1; }
+
+tmux set-option -g 'status-format[1]' "$stock"
+sh "$plugin"
+[ "$(tmux show-option -gqv status)" = 2 ] || { echo 'glance did not claim row 2' >&2; exit 1; }
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
+    echo 'original row count was not recorded' >&2; exit 1
+}
+owned="#('$tmp/plugin with spaces/scripts/agent-radar-glance' '#{session_name}' '#{window_width}')"
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$owned" ] || {
+    echo 'glance format not installed' >&2; exit 1
+}
+sh "$plugin"
+[ "$(tmux show-option -gqv @agent-radar-glance-orig-status)" = on ] || {
+    echo 'reload overwrote the original row count' >&2; exit 1
+}
+sh "$toggle"
+[ "$(tmux show-option -gqv status)" = on ] || { echo 'off kept an extra row' >&2; exit 1; }
+[ "$(tmux show-option -gqv 'status-format[1]')" = "$stock" ] || {
+    echo 'off did not restore the stock slot' >&2; exit 1
+}
+sh "$toggle"
+[ "$(tmux show-option -gqv status)" = 2 ] || { echo 'on did not restore row 2' >&2; exit 1; }
+
+pane=$(tmux display-message -p -t smoke:0.0 '#{pane_id}')
+cat > "$tmp/records" <<EOF
+TMUX_AGENT_RADAR_PANE_${pane}_AGENT=pi
+TMUX_AGENT_RADAR_PANE_${pane}_TARGET=smoke:0.0
+TMUX_AGENT_RADAR_PANE_${pane}_STATE=running
+EOF
+rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=colour8,fill=colour8]#[push-default]'*'#[pop-default]') : ;; *) echo 'fallback tint missing' >&2; exit 1 ;; esac
+case "$rendered" in *'📡 Agent Radar │ '*'#[fg=yellow]●'*) : ;; *) echo 'glance label or native status styles missing' >&2; exit 1 ;; esac
+case "$rendered" in *"$(printf '\033')"*) echo 'glance emitted terminal escapes' >&2; exit 1 ;; esac
+
+tmux set-option -gq @thm_surface_0 '#313244'
+rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=#313244,fill=#313244]#[push-default]'*) : ;; *) echo 'theme tint missing' >&2; exit 1 ;; esac
+tmux set-option -gq @thm_mantle '#181825'
+tmux set-option -gq @agent-radar-glance-tint '@thm_mantle'
+rendered=$(AGENT_RADAR_STORE_FILE=$tmp/records AGENT_RADAR_NOW=120 sh "$glance" smoke 160)
+case "$rendered" in '#[bg=#181825,fill=#181825]#[push-default]'*) : ;; *) echo 'custom theme tint missing' >&2; exit 1 ;; esac
+
+hook=$(tmux show-hooks -g session-window-changed)
+case "$hook" in *"run-shell -b \"'$tmp/plugin with spaces/scripts/agent-radar-status' '#{session_name}'\""*) : ;;
+    *) echo 'hook did not retain one quoted shell command' >&2; exit 1 ;;
+esac
+marker="$tmp/plugin with spaces/marker"
+cat > "$marker" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' "\$1" > '$tmp/hook-result'
+EOF
+chmod +x "$marker"
+tmux set-hook -g session-window-changed "run-shell \"'$marker' '#{session_name}'\""
+tmux set-hook -R -t smoke:0.0 session-window-changed
+[ "$(cat "$tmp/hook-result")" = smoke ] || { echo 'spaced hook path failed' >&2; exit 1; }
+
+printf 'agent-radar-tmux ok\n'

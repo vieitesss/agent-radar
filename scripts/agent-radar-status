@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
 set -eu
 
 command -v tmux >/dev/null 2>&1 || exit 0
@@ -11,14 +12,8 @@ poller_cmd=$script_dir/agent-radar-poller
 current_session=${1:-}
 records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-records.XXXXXX") || exit 1
 rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-status.XXXXXX") || exit 1
-unseen=$(mktemp "${TMPDIR:-/tmp}/agent-radar-unseen.XXXXXX") || exit 1
 unseen_windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-unseen-windows.XXXXXX") || exit 1
-trap 'rm -f "$records" "$rows" "$unseen" "$unseen_windows"' EXIT INT TERM HUP
-
-opt() {
-    v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
-    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
-}
+trap 'rm -f "$records" "$rows" "$unseen_windows"' EXIT INT TERM HUP
 
 # ponytail: a SIGKILL (or anything else a trap can't catch) leaves
 # @agent-radar-pid stale with no live owner, and nothing was re-invoking
@@ -50,6 +45,7 @@ sync_window_flags() {
     done
 }
 
+# shellcheck disable=SC2034
 while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
     [ -n "${pane:-}" ] || continue
     session=${target%%:*}
@@ -66,34 +62,11 @@ while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_a
     fi
 
     if [ "$tier" = 0 ]; then
-        printf '%s\n' "$session" >> "$unseen"
         printf '%s\n' "${target%.*}" >> "$unseen_windows"
     fi
 done < "$rows"
 
 sync_window_flags
 
-if ! grep -q . "$unseen" 2>/dev/null; then
-    exit 0
-fi
-
-label=$(opt @agent-radar-status-label agents)
-color=$(opt @agent-radar-status-color yellow)
-out=
-sep=
-
-while IFS= read -r session; do
-    [ -n "$session" ] || continue
-    count=$(grep -Fx "$session" "$unseen" 2>/dev/null | wc -l | tr -d ' ')
-    [ "$count" -gt 0 ] || continue
-
-    name=$session
-    [ "$count" -gt 1 ] && name="${session}×$count"
-    out=${out}${sep}${name}
-    sep=' / '
-done <<EOF
-$(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
-EOF
-
-[ -n "$out" ] || exit 0
-printf '#[fg=%s][%s - %s]#[default]' "$color" "$label" "$out"
+# No status-left output anymore; maintenance only.
+exit 0

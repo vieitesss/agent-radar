@@ -1,0 +1,124 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+toggle=$script_dir/agent-radar-toggle
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-toggle-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+log=$tmp/tmux.log
+: > "$log"
+
+mkdir "$tmp/bin"
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    show-option)
+        case "$3" in
+            @agent-radar-glance-state) printf '%s\n' "${TEST_STATE:-off}" ;;
+            @agent-radar-glance-row) printf '%s\n' "${TEST_ROW:-2}" ;;
+            @agent-radar-glance-orig-status) printf '%s\n' "${TEST_ORIG_STATUS:-}" ;;
+            status-format\[1\]|status-format\[2\]) printf '%s\n' "${TEST_SLOT:-}" ;;
+            status) printf '%s\n' "${TEST_STATUS:-on}" ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    set-option)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
+    display-message)
+        printf '%s\n' "$*" >> "$TMUX_LOG"
+        ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin/tmux"
+
+# --- off -> on: free slot ---
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_STATUS=on \
+    "$toggle"
+
+grep -F "set-option -g status-format[1] #('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" "$log" >/dev/null || {
+    echo 'toggle on did not write glance format' >&2
+    cat "$log"
+    exit 1
+}
+grep -F 'set-option -g status 2' "$log" >/dev/null || {
+    echo 'toggle on did not raise status' >&2; exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-orig-status' "$log" >/dev/null || {
+    echo 'toggle on did not record pre-raise status' >&2; exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-state on' "$log" >/dev/null || {
+    echo 'toggle on did not set live state' >&2; exit 1
+}
+
+# --- off -> on: occupied slot ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=off TEST_SLOT='custom #{pane_index}' \
+    "$toggle"
+grep -F 'agent-radar: status line 2 is in use; set -g @agent-radar-glance-row M' "$log" >/dev/null || {
+    echo 'toggle on did not error on occupied slot' >&2; exit 1
+}
+if grep -F 'status-format[1]' "$log" >/dev/null; then
+    echo 'toggle on wrote glance despite occupied slot' >&2; exit 1
+fi
+
+# --- on -> off: restore stock slot and lower status (we raised it) ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
+    echo 'toggle off did not restore stock slot' >&2; exit 1
+}
+grep -F 'set-option -g status on' "$log" >/dev/null || {
+    echo 'toggle off did not lower status' >&2; exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-state off' "$log" >/dev/null || {
+    echo 'toggle off did not clear live state' >&2; exit 1
+}
+
+# --- on -> off: slot changed by user, still lower status if we raised it ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=1 \
+    TEST_SLOT='custom user agent-radar-glance text' "$toggle"
+if grep -F 'status-format[1]' "$log" >/dev/null; then
+    echo 'toggle off clobbered user slot' >&2; exit 1
+fi
+grep -F 'set-option -g status on' "$log" >/dev/null || {
+    echo 'toggle off did not lower status when slot changed' >&2; exit 1
+}
+
+# --- on -> off: do not lower status when current count differs from row ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=3 TEST_ORIG_STATUS=1 \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+if grep -F 'set-option -g status' "$log" | grep -v 'status-format' >/dev/null; then
+    echo 'toggle off changed status when user had 3 lines' >&2; exit 1
+fi
+
+# --- on -> off: do not lower status if the user already had this many lines ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_STATUS=2 TEST_ORIG_STATUS=2 \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+grep -F 'set-option -g status-format[1] #[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }' "$log" >/dev/null || {
+    echo 'toggle off did not restore stock slot' >&2; exit 1
+}
+if grep -F 'set-option -g status on' "$log" >/dev/null; then
+    echo 'toggle off lowered status when user originally had 2 lines' >&2; exit 1
+fi
+
+# --- on -> off: restore a numeric baseline below the glance row ---
+: > "$log"
+PATH=$tmp/bin:$PATH TMUX_LOG=$log TEST_STATE=on TEST_ROW=3 TEST_STATUS=3 TEST_ORIG_STATUS=2 \
+    TEST_SLOT="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')" \
+    "$toggle"
+grep -F 'set-option -g status 2' "$log" >/dev/null || {
+    echo 'toggle off did not restore the original status count of 2' >&2; exit 1
+}
+
+printf 'agent-radar-toggle ok\n'

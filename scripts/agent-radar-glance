@@ -1,0 +1,244 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007
+set -eu
+
+label='📡 Agent Radar │ '
+command -v tmux >/dev/null 2>&1 || { printf '%s%s\n' "$label" 'cannot read agent state'; exit 0; }
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 0
+store_cmd=$script_dir/agent-radar-store
+classify_cmd=$script_dir/agent-radar-classify
+poller_cmd=$script_dir/agent-radar-poller
+
+opt() {
+    v=$(tmux show-option -gqv "$1" 2>/dev/null || true)
+    [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
+}
+
+glance_row=$(opt @agent-radar-glance-row 2)
+case "$glance_row" in
+    ''|*[!0-9]*) glance_row=2 ;;
+esac
+glance_idx=$((glance_row - 1))
+stock_text='#[align=centre]#{P:#{?pane_active,#[reverse],}#{pane_index}[#{pane_width}x#{pane_height}]#[default] }'
+glance_format="#('$script_dir/agent-radar-glance' '#{session_name}' '#{window_width}')"
+
+# A cached #() can outlive a row change; stop if the configured row is custom.
+slot=$(tmux show-option -gqv "status-format[$glance_idx]" 2>/dev/null || true)
+free=0
+case "$slot" in
+    ''|"$stock_text"|"$glance_format") free=1 ;;
+esac
+if [ "$free" -eq 0 ]; then
+    err_sent=$(tmux show-option -gqv @agent-radar-glance-occupied-error 2>/dev/null || true)
+    if [ -z "$err_sent" ]; then
+        tmux display-message "agent-radar: status line $glance_row is in use; set -g @agent-radar-glance-row M"
+        tmux set-option -gq @agent-radar-glance-occupied-error 1
+    fi
+    exit 0
+fi
+tmux set-option -gu @agent-radar-glance-occupied-error 2>/dev/null || true
+
+current_session=${1:-}
+width=${2:-}
+case "$width" in
+    ''|*[!0-9]*) width=80 ;;
+esac
+
+tint=$(tmux show-option -gqv @agent-radar-glance-tint 2>/dev/null || true)
+if [ -z "$tint" ]; then
+    tint=$(tmux show-option -gqv @thm_surface_0 2>/dev/null || true)
+    [ -n "$tint" ] || tint=colour8
+fi
+case "$tint" in
+    @*) tint=$(tmux show-option -gqv "$tint" 2>/dev/null || true); [ -n "$tint" ] || tint=colour8 ;;
+esac
+case "$tint" in
+    ''|*[!a-zA-Z0-9#]*) tint=colour8 ;;
+esac
+# Keep the tint across field-level #[default] resets; fill paints unused cells.
+tint_prefix="#[bg=$tint,fill=$tint]#[push-default]"
+tint_suffix='#[pop-default]'
+# 📡 takes two terminal cells; reserve 17 columns for the full label.
+if [ "$width" -gt 17 ]; then width=$((width - 17)); else width=0; fi
+emit() { printf '%s%s%s%s\n' "$tint_prefix" "$label" "$1" "$tint_suffix"; }
+
+records=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-records.XXXXXX") || { emit 'cannot read agent state'; exit 0; }
+rows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-rows.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records"; exit 0; }
+unseen_windows=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-unseen.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records" "$rows"; exit 0; }
+render_input=$(mktemp "${TMPDIR:-/tmp}/agent-radar-glance-render.XXXXXX") || { emit 'cannot read agent state'; rm -f "$records" "$rows" "$unseen_windows"; exit 0; }
+trap 'rm -f "$records" "$rows" "$unseen_windows" "$render_input"' EXIT INT TERM HUP
+
+# Poller self-heal: restart if the recorded pid is missing or stale.
+poller_pid=$(tmux show-option -gqv @agent-radar-pid 2>/dev/null || true)
+if [ -z "$poller_pid" ] || ! kill -0 "$poller_pid" 2>/dev/null; then
+    tmux run-shell -b "'$poller_cmd' start" >/dev/null 2>&1 || true
+fi
+
+if ! "$store_cmd" records > "$records" 2>/dev/null; then
+    emit 'cannot read agent state'
+    exit 0
+fi
+
+now=${AGENT_RADAR_NOW:-}
+[ -n "$now" ] || now=$(date +%s)
+if ! "$classify_cmd" "$now" < "$records" 2>/dev/null | sort -t '|' -k1,1n -k3,3 > "$rows"; then
+    emit 'cannot read agent state'
+    exit 0
+fi
+
+: > "$unseen_windows"
+while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
+    [ -n "${pane:-}" ] || continue
+    session=${target%%:*}
+
+    if [ "$tier" != 1 ] && [ -n "$current_session" ] && [ "$session" = "$current_session" ]; then
+        active_pane=$(tmux display-message -p -t "$current_session" '#{pane_id}' 2>/dev/null || true)
+        if [ "$active_pane" = "$pane" ]; then
+            AGENT_RADAR_STORE_RECORDS_FILE=$records "$store_cmd" set "$pane" seen_stopped_at "$stopped_at" >/dev/null 2>&1 || true
+            continue
+        fi
+    fi
+
+    if [ "$tier" = 0 ]; then
+        printf '%s\n' "${target%.*}" >> "$unseen_windows"
+    fi
+done < "$rows"
+
+# Sync window-highlight flags: clear everywhere, then set on unseen-stopped windows.
+tmux list-windows -a -F '#{session_name}:#{window_index}' 2>/dev/null |
+while IFS= read -r window; do
+    [ -n "$window" ] || continue
+    tmux set-window-option -t "$window" -qu @agent-radar-window-stopped 2>/dev/null || true
+done
+
+sort -u "$unseen_windows" |
+while IFS= read -r window; do
+    [ -n "$window" ] || continue
+    tmux set-window-option -t "$window" -q @agent-radar-window-stopped 1 2>/dev/null || true
+done
+
+if [ ! -s "$rows" ]; then
+    emit 'no agent panes'
+    exit 0
+fi
+
+fields=$(opt @agent-radar-glance-fields dot,target)
+need_window=0
+need_branch=0
+case ",$fields," in *,window,*) need_window=1 ;; esac
+case ",$fields," in *,branch,*) need_branch=1 ;; esac
+
+: > "$render_input"
+while IFS='|' read -r tier age sortkey pane agent target state stopped_at seen_at; do
+    [ -n "${pane:-}" ] || continue
+    session=${target%%:*}
+    win_name=''
+    branch=''
+
+    if [ "$need_window" -eq 1 ]; then
+        win_name=$(tmux display-message -p -t "$pane" '#{window_name}' 2>/dev/null || true)
+    fi
+    if [ "$need_branch" -eq 1 ]; then
+        pane_dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}' 2>/dev/null || true)
+        branch=$(git -C "$pane_dir" branch --show-current 2>/dev/null || true)
+        [ -n "$branch" ] || branch='-'
+    fi
+
+    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+        "$tier" "$age" "$sortkey" "$pane" "$agent" "$target" \
+        "$state" "$stopped_at" "$seen_at" "$session" "$win_name" "$branch" >> "$render_input"
+done < "$rows"
+
+LC_ALL=C awk -v fields="$fields" -v width="$width" -v prefix="$tint_prefix" -v suffix="$tint_suffix" -v label="$label" -F '|' '
+function visible(s,    tmp) {
+    tmp = s
+    gsub(/#\[[^]]*]/, "", tmp)
+    gsub(/[\200-\277]/, "", tmp)
+    return length(tmp)
+}
+function bold(s) { return "#[bold]" s "#[default]" }
+function dim(s)  { return "#[dim]" s "#[default]" }
+function sep()   { return " " dim("·") " " }
+{
+    tier = $1
+    age = $2
+    pane = $4
+    agent = $5
+    target = $6
+    session = $10
+    win_name = $11
+    branch = $12
+
+    if (pane == "") next
+
+    if (tier == 0)
+        dot = "#[fg=red]●#[default]"
+    else if (tier == 1)
+        dot = "#[fg=yellow]●#[default]"
+    else
+        dot = "#[fg=green]●#[default]"
+
+    rest = target
+    sub(/^[^:]*:/, ":", rest)
+
+    n = split(fields, f, ",")
+    out = ""
+    last_tok = ""
+    for (i = 1; i <= n; i++) {
+        tok = f[i]
+        bit = ""
+        if (tok == "dot")
+            bit = dot
+        else if (tok == "target")
+            bit = bold(session) dim(rest)
+        else if (tok == "harness")
+            bit = bold(agent)
+        else if (tok == "session")
+            bit = bold(session)
+        else if (tok == "window")
+            bit = bold(win_name)
+        else if (tok == "branch") {
+            if (branch == "" || branch == "-")
+                bit = dim("-")
+            else
+                bit = dim("⎇ " branch)
+        }
+        else if (tok == "age" && age != "")
+            bit = dim(age)
+
+        if (bit == "") continue
+        if (out == "")
+            out = bit
+        else if (tok == "age" || last_tok == "dot")
+            out = out " " bit
+        else
+            out = out sep() bit
+        last_tok = tok
+    }
+
+    pane_count++
+    if (out != "") {
+        npanes++
+        pane_text[npanes] = "[" out "]"
+    }
+}
+END {
+    if (pane_count == 0) {
+        print prefix label "no agent panes" suffix
+        exit
+    }
+    if (npanes == 0) {
+        print prefix label suffix
+        exit
+    }
+
+    out = pane_text[1]
+    for (i = 2; i <= npanes; i++) {
+        candidate = out " " pane_text[i]
+        if (visible(candidate) > width) break
+        out = candidate
+    }
+
+    print prefix label out suffix
+}' "$render_input"

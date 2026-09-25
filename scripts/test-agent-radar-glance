@@ -1,0 +1,302 @@
+#!/usr/bin/env sh
+# shellcheck shell=sh disable=SC1007,SC2030,SC2031,SC2123
+set -eu
+
+script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
+glance=$script_dir/agent-radar-glance
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-radar-glance-test.XXXXXX") || exit 1
+trap 'rm -rf "$tmp"' EXIT INT TERM HUP
+
+env=$tmp/env
+log=$tmp/tmux.log
+: > "$log"
+
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%z_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%z_TARGET=zeta:1.0
+TMUX_AGENT_RADAR_PANE_%z_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%z_STOPPED_AT=90
+TMUX_AGENT_RADAR_PANE_%m_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%m_TARGET=middle:1.0
+TMUX_AGENT_RADAR_PANE_%m_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%m_STOPPED_AT=95
+TMUX_AGENT_RADAR_PANE_%a_AGENT=claude
+TMUX_AGENT_RADAR_PANE_%a_TARGET=alpha:1.0
+TMUX_AGENT_RADAR_PANE_%a_STATE=running
+TMUX_AGENT_RADAR_PANE_%b_AGENT=codex
+TMUX_AGENT_RADAR_PANE_%b_TARGET=beta:2.0
+TMUX_AGENT_RADAR_PANE_%b_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%b_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%b_SEEN_STOPPED_AT=100
+EOF
+
+mkdir "$tmp/bin" "$tmp/corebin"
+for _tool in sh env mktemp rm date sort printf cat awk; do
+    _path=$(command -v "$_tool" 2>/dev/null || true)
+    [ -n "$_path" ] && ln -s "$_path" "$tmp/corebin/$_tool"
+done
+cat > "$tmp/bin/tmux" <<'EOF'
+#!/usr/bin/env sh
+case "$1" in
+    show-option)
+        case "$3" in
+            @agent-radar-glance) printf '%s\n' "${TEST_GLANCE:-on}" ;;
+            @agent-radar-glance-fields) printf '%s\n' "${TEST_FIELDS:-dot,target}" ;;
+            @agent-radar-glance-tint) printf '%s\n' "${TEST_TINT:-}" ;;
+            @thm_surface_0) printf '%s\n' "${TEST_THEME_TINT-}" ;;
+            @thm_mantle) printf '%s\n' '#181825' ;;
+            @agent-radar-glance-row) printf '%s\n' "${TEST_ROW:-2}" ;;
+            @agent-radar-pid) printf '%s\n' "${TEST_PID:-$$}" ;;
+            @agent-radar-glance-occupied-error) printf '%s\n' "${TEST_OCCUPIED_ERROR:-}" ;;
+            'status-format[1]') printf '%s\n' "${TEST_SLOT:-}" ;;
+            *) exit 0 ;;
+        esac
+        ;;
+    display-message)
+        if [ "$2" = -p ]; then
+            shift
+            pane=''
+            fmt=''
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    -t) pane=$2; shift 2 ;;
+                    -p) shift ;;
+                    *) fmt=$1; shift ;;
+                esac
+            done
+            case "$fmt" in
+                '#{session_name}') printf '%s\n' "${TEST_SESSION:-work}" ;;
+                '#{pane_id}')
+                    case "$pane" in
+                        work) printf '%s\n' "${TEST_ACTIVE_PANE:-}" ;;
+                        *) printf '\n' ;;
+                    esac
+                    ;;
+                '#{window_name}')
+                    case "$pane" in
+                        %z) printf 'win-z\n' ;;
+                        %m) printf 'win-m\n' ;;
+                        %a) printf 'win-a\n' ;;
+                        %b) printf 'win-b\n' ;;
+                        *) printf '\n' ;;
+                    esac
+                    ;;
+                '#{pane_current_path}')
+                    case "$pane" in
+                        %z) printf '%s\n' "$TEST_DIR/z" ;;
+                        %m) printf '%s\n' "$TEST_DIR/m" ;;
+                        %a) printf '%s\n' "$TEST_DIR/a" ;;
+                        %b) printf '%s\n' "$TEST_DIR/b" ;;
+                        *) printf '\n' ;;
+                    esac
+                    ;;
+                '#{window_width}') printf '%s\n' "${TEST_WIDTH:-80}" ;;
+                *) printf '\n' ;;
+            esac
+        else
+            printf '%s\n' "$*" >> "$TMUX_LOG"
+        fi
+        ;;
+    run-shell) printf '%s\n' "$*" >> "$TMUX_LOG" ;;
+    list-windows) printf 'work:1\nwork:2\nwork:3\nother:1\n' ;;
+    set-window-option) printf '%s\n' "$*" >> "$TMUX_LOG" ;;
+    set-environment) printf '%s\n' "$*" >> "$TMUX_LOG" ;;
+    set-option) printf '%s\n' "$*" >> "$TMUX_LOG" ;;
+    *) echo "unexpected tmux $*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$tmp/bin/tmux"
+
+mkdir -p "$tmp/z" "$tmp/m" "$tmp/a" "$tmp/b"
+cat > "$tmp/bin/git" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+dir=.
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -C) dir=$2; shift 2 ;;
+        branch|--show-current) shift ;;
+        *) shift ;;
+    esac
+done
+case "$dir" in
+    *z) printf 'feat/spam-stop\n' ;;
+    *m) printf 'feat/middle\n' ;;
+    *b) printf 'main\n' ;;
+    *) exit 0 ;;
+esac
+EOF
+chmod +x "$tmp/bin/git"
+
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out"
+
+{
+    printf '#[bg=colour8,fill=colour8]#[push-default]'
+    printf '📡 Agent Radar │ '
+    printf '[#[fg=red]●#[default] #[bold]zeta#[default]#[dim]:1.0#[default]]'
+    printf ' '
+    printf '[#[fg=red]●#[default] #[bold]middle#[default]#[dim]:1.0#[default]]'
+    printf ' '
+    printf '[#[fg=yellow]●#[default] #[bold]alpha#[default]#[dim]:1.0#[default]]'
+    printf ' '
+    printf '[#[fg=green]●#[default] #[bold]beta#[default]#[dim]:2.0#[default]]'
+    printf '#[pop-default]\n'
+} > "$tmp/expected-out"
+diff -u "$tmp/expected-out" "$tmp/out"
+
+# --- theme default, custom color, theme token, opt-out, malformed fallback ---
+check_tint() {
+    name=$1 tint=$2 theme=$3 expected=$4
+    PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+        TEST_TINT="$tint" TEST_THEME_TINT="$theme" AGENT_RADAR_NOW=120 \
+        "$glance" work 200 > "$tmp/out-$name"
+    grep -F "#[bg=$expected,fill=$expected]#[push-default]" "$tmp/out-$name" >/dev/null || {
+        echo "wrong $name tint" >&2; exit 1
+    }
+}
+check_tint theme '' '#313244' '#313244'
+check_tint custom '#445566' '' '#445566'
+check_tint token '@thm_mantle' '' '#181825'
+check_tint inherit default '' default
+check_tint malformed 'red]#[fg=black' '' colour8
+
+# --- optional fields: harness, session, window, branch, age ---
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_FIELDS='dot,harness,session,window,branch,age' AGENT_RADAR_NOW=120 \
+    "$glance" work 200 > "$tmp/out2"
+
+{
+    printf '#[bg=colour8,fill=colour8]#[push-default]'
+    printf '📡 Agent Radar │ '
+    printf '[#[fg=red]●#[default] #[bold]pi#[default] #[dim]·#[default] #[bold]zeta#[default] #[dim]·#[default] #[bold]win-z#[default] #[dim]·#[default] #[dim]⎇ feat/spam-stop#[default] #[dim]30s#[default]]'
+    printf ' '
+    printf '[#[fg=red]●#[default] #[bold]pi#[default] #[dim]·#[default] #[bold]middle#[default] #[dim]·#[default] #[bold]win-m#[default] #[dim]·#[default] #[dim]⎇ feat/middle#[default] #[dim]25s#[default]]'
+    printf ' '
+    printf '[#[fg=yellow]●#[default] #[bold]claude#[default] #[dim]·#[default] #[bold]alpha#[default] #[dim]·#[default] #[bold]win-a#[default] #[dim]·#[default] #[dim]-#[default]]'
+    printf ' '
+    printf '[#[fg=green]●#[default] #[bold]codex#[default] #[dim]·#[default] #[bold]beta#[default] #[dim]·#[default] #[bold]win-b#[default] #[dim]·#[default] #[dim]⎇ main#[default] #[dim]20s#[default]]'
+    printf '#[pop-default]\n'
+} > "$tmp/expected-out2"
+diff -u "$tmp/expected-out2" "$tmp/out2"
+
+# --- unknown-only fields: keep the row label ---
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_FIELDS='unknown' AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out-no-fields"
+printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]📡 Agent Radar │ #[pop-default]' > "$tmp/expected-no-fields"
+diff -u "$tmp/expected-no-fields" "$tmp/out-no-fields"
+
+# --- the live row still renders when the reload setting is off ---
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_GLANCE=off AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out3"
+diff -u "$tmp/expected-out" "$tmp/out3"
+
+# --- no agent panes ---
+: > "$env"
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out4"
+printf '%s\n' '#[bg=colour8,fill=colour8]#[push-default]📡 Agent Radar │ no agent panes#[pop-default]' > "$tmp/expected-out4"
+diff -u "$tmp/expected-out4" "$tmp/out4"
+
+# --- cannot read agent state: tmux missing from PATH ---
+: > "$env"
+: > "$log"
+(
+    PATH=$tmp/corebin
+    AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out5"
+)
+printf '📡 Agent Radar │ cannot read agent state\n' > "$tmp/expected-out5"
+diff -u "$tmp/expected-out5" "$tmp/out5"
+
+# --- truncation: keep unseen-stopped at the front ---
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%z_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%z_TARGET=zeta:1.0
+TMUX_AGENT_RADAR_PANE_%z_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%z_STOPPED_AT=90
+TMUX_AGENT_RADAR_PANE_%m_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%m_TARGET=middle:1.0
+TMUX_AGENT_RADAR_PANE_%m_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%m_STOPPED_AT=95
+TMUX_AGENT_RADAR_PANE_%a_AGENT=claude
+TMUX_AGENT_RADAR_PANE_%a_TARGET=alpha:1.0
+TMUX_AGENT_RADAR_PANE_%a_STATE=running
+TMUX_AGENT_RADAR_PANE_%b_AGENT=codex
+TMUX_AGENT_RADAR_PANE_%b_TARGET=beta:2.0
+TMUX_AGENT_RADAR_PANE_%b_STATE=stopped
+TMUX_AGENT_RADAR_PANE_%b_STOPPED_AT=100
+TMUX_AGENT_RADAR_PANE_%b_SEEN_STOPPED_AT=100
+EOF
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_WIDTH=20 AGENT_RADAR_NOW=120 "$glance" work 20 > "$tmp/out6"
+grep -F '📡 Agent Radar │ ' "$tmp/out6" >/dev/null || { echo 'narrow row lost its label' >&2; exit 1; }
+grep -F 'zeta' "$tmp/out6" >/dev/null || { echo 'truncation dropped front pane' >&2; exit 1; }
+grep -F 'middle' "$tmp/out6" >/dev/null && { echo 'truncation exceeded width' >&2; exit 1; }
+grep -F 'beta' "$tmp/out6" >/dev/null && { echo 'truncation kept tail pane' >&2; exit 1; }
+
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 48 > "$tmp/out6-boundary"
+grep -F 'middle' "$tmp/out6-boundary" >/dev/null || { echo 'second pane should fit after label' >&2; exit 1; }
+grep -F 'alpha' "$tmp/out6-boundary" >/dev/null && { echo 'label width did not reserve space' >&2; exit 1; }
+
+# --- 66 = 17-column label + five 9-column cards + four spaces ---
+cat > "$env" <<'EOF'
+TMUX_AGENT_RADAR_PANE_%one_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%one_TARGET=s:1.0
+TMUX_AGENT_RADAR_PANE_%one_STATE=running
+TMUX_AGENT_RADAR_PANE_%two_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%two_TARGET=s:2.0
+TMUX_AGENT_RADAR_PANE_%two_STATE=running
+TMUX_AGENT_RADAR_PANE_%three_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%three_TARGET=s:3.0
+TMUX_AGENT_RADAR_PANE_%three_STATE=running
+TMUX_AGENT_RADAR_PANE_%four_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%four_TARGET=s:4.0
+TMUX_AGENT_RADAR_PANE_%four_STATE=running
+TMUX_AGENT_RADAR_PANE_%five_AGENT=pi
+TMUX_AGENT_RADAR_PANE_%five_TARGET=s:5.0
+TMUX_AGENT_RADAR_PANE_%five_STATE=running
+EOF
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    AGENT_RADAR_NOW=120 "$glance" work 66 > "$tmp/out-width-66"
+for target in :1.0 :2.0 :3.0 :4.0 :5.0; do
+    grep -F "#[bold]s#[default]#[dim]$target#[default]" "$tmp/out-width-66" >/dev/null || {
+        echo "width 66 dropped card $target" >&2; exit 1;
+    }
+done
+
+# --- occupied slot: error once ---
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_SLOT='custom #{pane_index}' AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out7"
+[ -z "$(cat "$tmp/out7")" ] || { echo 'occupied slot produced output' >&2; exit 1; }
+grep -F 'agent-radar: status line 2 is in use; set -g @agent-radar-glance-row M' "$log" >/dev/null || {
+    echo 'occupied slot did not emit error' >&2; exit 1
+}
+grep -F 'set-option -gq @agent-radar-glance-occupied-error 1' "$log" >/dev/null || {
+    echo 'occupied slot did not set error flag' >&2; exit 1
+}
+
+# second call with error flag set should not display again
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_SLOT='custom #{pane_index}' TEST_OCCUPIED_ERROR=1 AGENT_RADAR_NOW=120 \
+    "$glance" work 200 > "$tmp/out8"
+grep -F 'status line 2 is in use' "$log" >/dev/null && {
+    echo 'occupied slot emitted error twice' >&2; exit 1
+}
+
+# free slot clears the error flag
+: > "$log"
+PATH=$tmp/bin:$PATH TEST_DIR=$tmp AGENT_RADAR_STORE_FILE=$env TMUX_LOG=$log \
+    TEST_OCCUPIED_ERROR=1 AGENT_RADAR_NOW=120 "$glance" work 200 > "$tmp/out9"
+grep -F 'set-option -gu @agent-radar-glance-occupied-error' "$log" >/dev/null || {
+    echo 'free slot did not clear error flag' >&2; exit 1
+}
+
+printf 'agent-radar-glance ok\n'
