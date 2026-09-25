@@ -74,9 +74,10 @@ the ones that have no hooks.
 
 agent-radar finds **agent panes**: panes whose foreground process is on an
 allowlist of harnesses. It polls each one for the harness's **working
-indicator**, such as the animated braille glyph. A pane is **working** while
-that indicator is on screen. It becomes **stopped** once the indicator has been
-gone for a few seconds, which means the agent needs you.
+indicator**, such as the animated braille glyph or Claude Code's in-flight
+status line. A pane is **working** while that indicator is on screen. It becomes
+**stopped** once the indicator has been gone for a few seconds, which means the
+agent needs you.
 
 | Dot | State | Meaning |
 |:---:|-------|---------|
@@ -183,7 +184,8 @@ agent-radar doesn't touch `status-left`.
 
 | Harness | Detected as working when |
 |---------|--------------------------|
-| `pi`, `claude`, `codex` | The braille working glyph is on screen. |
+| `pi`, `codex` | The braille working glyph is on screen. |
+| `claude` | Its live status line has a spinner, a status word, an ellipsis, and an opening parenthesis. Completed-turn summaries are idle. |
 | `opencode` | Its square progress bar is on screen. |
 | `hermes` | Its prompt line shows the running hint (`msg=interrupt`). |
 | `aider`, `cursor` | Their panes are detected, but no default indicator is known. Set `@agent-radar-working-pattern` to track when they're working. |
@@ -211,7 +213,7 @@ loads.
 | `@agent-radar-glance-fields` | `dot,target` | Comma-separated fields, in display order: `dot`, `target` (`session:window.pane`), `harness`, `session`, `window`, `branch` (`⎇ name` from Git in the pane's directory, or `-`), `age` (stopped panes only). Unknown fields are skipped. |
 | `@agent-radar-glance-tint` | `@thm_surface_0` if set, else `colour8` | Background of the glance row only. Accepts a tmux color (`#RRGGBB`, `colourN`, a color name), a global palette option such as `@thm_mantle`, or `default` to use the theme's status background. Palette options are read when the row is drawn, so a theme can load after this setting. |
 | `@agent-radar-glance-row` | `2` | Which status row to use, counting from 1 (row 2 is `status-format[1]`). A custom row that's already in use isn't overwritten. |
-| `@agent-radar-working-pattern` | braille glyph, square bar or `msg=interrupt` | Extended regex for a harness's working indicator, matched byte by byte. Override it for agents that use a different indicator. |
+| `@agent-radar-working-pattern` | braille glyph, Claude Code live status line, square bar or `msg=interrupt` | Extended regex for a harness's working indicator, matched byte by byte. Override it for agents that use a different indicator. |
 | `@agent-radar-key` | `a` | Prefix key that opens the navigator. |
 | `@agent-radar-popup-width` | `40%` | Navigator width. |
 | `@agent-radar-popup-height` | `30%` | Navigator height. |

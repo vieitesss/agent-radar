@@ -18,10 +18,11 @@ _Avoid_: location, path
 
 **Working indicator**:
 The live marker a harness paints while working — a braille progress glyph
-(pi/claude/codex), a pulsing square progress bar (opencode), or the running
-hint on hermes' prompt line (`msg=interrupt`). The one positive signal
-agent-radar keys off; it only exists while the harness is working, so it can't
-be faked by quoted transcript text.
+(pi/codex), Claude Code's spinner followed by its live status word, ellipsis,
+and opening parenthesis (not its completed-turn summary), a pulsing square
+progress bar (opencode), or the running hint on hermes' prompt line
+(`msg=interrupt`). The one positive signal agent-radar keys off; it only exists
+while the harness is working, so it can't be faked by quoted transcript text.
 _Avoid_: harness-specific names as generic terms
 
 **Working**:
